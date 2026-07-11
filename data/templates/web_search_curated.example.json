@@ -1,0 +1,15 @@
+{
+  "_note": "Copy selected target sections to data/private/web_search_curated.json when you want to apply manually reviewed search evidence. Do not commit private curated evidence.",
+  "example_target": [
+    {
+      "姓名": "Teacher Name",
+      "置信度": "高",
+      "标题": "Reviewed source title",
+      "证据": "Short audited evidence summary.",
+      "关键词": "keyword one; keyword two",
+      "来源URL": "https://example.edu/faculty-page",
+      "建议": "Use as supplemental evidence; review manually before contacting.",
+      "推荐等级": "可以考虑"
+    }
+  ]
+}

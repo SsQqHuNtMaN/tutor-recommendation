@@ -1,0 +1,29 @@
+# Sensitive user inputs
+*.pdf
+*.docx
+*.doc
+data/private/*
+!data/private/README.md
+docs/private/
+AGENTS.local.md
+
+# Generated research outputs and caches
+.codex/
+outputs/
+exports/
+viewer-state/
+*.xlsx
+*.jsonl
+*_cache/
+arxiv_debug/
+archive/
+
+# Python/runtime artifacts
+__pycache__/
+*.py[cod]
+
+# Local secrets and environment files
+.env
+.env.*
+*.key
+*.pem

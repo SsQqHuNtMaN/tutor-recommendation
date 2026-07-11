@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>教师套磁看板</title>
+    <link rel="stylesheet" href="assets/app.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="title-block">
+          <h1>教师套磁看板</h1>
+          <div id="summary" class="summary">未加载数据</div>
+        </div>
+        <div class="actions">
+          <button id="pickOutputs" type="button" title="选择 outputs 目录">打开</button>
+          <label class="file-button" title="选择 outputs 目录或多个 xlsx">
+            导入
+            <input id="fileInput" type="file" multiple webkitdirectory accept=".xlsx,.json" />
+          </label>
+          <label class="file-button" title="导入 contact_status.json">
+            状态
+            <input id="statusInput" type="file" accept=".json" />
+          </label>
+          <button id="saveStatus" type="button" title="保存 contact_status.json">保存</button>
+          <button id="syncExcel" type="button" title="同步状态到当前 Excel 工作簿" style="display: none">同步Excel</button>
+          <button id="downloadStatus" type="button" title="下载 contact_status.json">下载</button>
+          <button id="exportXlsx" type="button" title="导出当前筛选">导出</button>
+        </div>
+      </header>
+
+      <nav id="viewTabs" class="view-tabs" aria-label="视图">
+        <button type="button" data-view="all" class="active" aria-pressed="true">全部教师</button>
+        <button type="button" data-view="contacted" aria-pressed="false">已套磁</button>
+      </nav>
+
+      <section class="filters" aria-label="筛选">
+        <input id="searchInput" type="search" placeholder="姓名 / 学校 / 方向 / 关键词" />
+        <select id="schoolFilter"></select>
+        <select id="collegeFilter"></select>
+        <select id="levelFilter"></select>
+        <select id="contactFilter"></select>
+        <input id="minScore" type="number" min="0" step="1" placeholder="最低分" />
+        <label class="check-line">
+          <input id="priorityOnly" type="checkbox" />
+          <span>只看套磁名单</span>
+        </label>
+        <label class="check-line">
+          <input id="hideContacted" type="checkbox" />
+          <span>隐藏已标记</span>
+        </label>
+        <label class="check-line">
+          <input id="weakEvidenceOnly" type="checkbox" />
+          <span>低证据</span>
+        </label>
+      </section>
+
+      <section class="content">
+        <div class="table-pane">
+          <table>
+            <thead>
+              <tr>
+                <th>姓名</th>
+                <th>套磁情况</th>
+                <th>学校 / 学院</th>
+                <th>推荐</th>
+                <th>分数</th>
+                <th>核心匹配</th>
+                <th>锚点 / 风险</th>
+                <th>套磁记录</th>
+              </tr>
+            </thead>
+            <tbody id="teacherRows"></tbody>
+          </table>
+        </div>
+        <aside id="detailPane" class="detail-pane">
+          <div class="empty-detail">选择一位教师</div>
+        </aside>
+      </section>
+    </main>
+
+    <script src="vendor/xlsx.full.min.js"></script>
+    <script src="assets/app.js"></script>
+  </body>
+</html>

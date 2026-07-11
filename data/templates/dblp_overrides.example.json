@@ -1,0 +1,15 @@
+{
+  "_note": "Copy this file to data/private/dblp_overrides.json when you need manual DBLP disambiguation. Do not commit private overrides.",
+  "global": {
+    "Teacher Name": ["DBLP Author Name", "dblp/pid"]
+  },
+  "targets": [
+    {
+      "school_slug": "school",
+      "college_slug": "college",
+      "name": "Teacher Name",
+      "author": "DBLP Author Name",
+      "pid": "dblp/pid"
+    }
+  ]
+}

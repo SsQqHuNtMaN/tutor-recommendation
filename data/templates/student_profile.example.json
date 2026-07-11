@@ -1,0 +1,26 @@
+{
+  "_note": "这是公开占位模板，不代表项目作者或任何真实申请者。复制到 data/private/student_profile.json 后，请替换为自己的背景和目标方向。",
+  "resume_match_context": "示例画像：申请者希望匹配人工智能、机器学习、数据挖掘或软件工程相关导师。请按真实简历改写本字段。",
+  "keyword_weights": [
+    ["artificial intelligence", 10],
+    ["machine learning", 10],
+    ["data mining", 8],
+    ["software engineering", 6],
+    ["人工智能", 10],
+    ["机器学习", 10]
+  ],
+  "institute_bonus": [
+    ["人工智能", 4],
+    ["计算机", 3]
+  ],
+  "concept_alias_groups": [
+    ["artificial intelligence", "人工智能"],
+    ["machine learning", "机器学习"]
+  ],
+  "high_signal_terms": [
+    "artificial intelligence",
+    "machine learning",
+    "人工智能",
+    "机器学习"
+  ]
+}
