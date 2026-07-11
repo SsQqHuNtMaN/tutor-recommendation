@@ -109,6 +109,13 @@ python checkpoint_doctor.py <target>
 python result_quality_audit.py --fail-on-violations
 ```
 
+Run the unit tests:
+
+```powershell
+$env:PYTHONPATH=(Join-Path (Get-Location) 'src')
+python -m unittest discover -s tests -v
+```
+
 Launch the local dashboard:
 
 ```powershell
@@ -192,6 +199,10 @@ Valid contact statuses are `已套磁`, `先不考虑`, `不可能`, and `不匹
   may provide limited support only when an official core-direction anchor
   already exists.
 - Every recommendation needs a readable reason and source columns.
+- The viewer must display ranking-policy outputs rather than re-score rows in
+  JavaScript. Keep official direction, matched profile terms, and auxiliary
+  DBLP/arXiv/web signals visually separate; missing structured fields in old
+  workbooks should be labeled as old data instead of inferred.
 - Finalize-only reconstruction requires complete valid checkpoint coverage by
   default. Use `checkpoint_doctor.py` before relying on it; partial output must
   be explicitly requested.

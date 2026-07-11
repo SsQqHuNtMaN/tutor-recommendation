@@ -117,7 +117,7 @@ $env:SCHOOL_SLUG='<school_slug>'
 $env:COLLEGE_SLUG='<college_slug>'
 ```
 
-源码集中在 `src/tutor_recommendation/`；根目录的 `build_teacher_match.py`、`update_teacher_match_with_dblp.py`、`complete_teacher_research.py`、`viewer_server.py` 等文件是命令入口包装器。个人简历、申请材料和本地学生画像放在 `data/private/`，可复用画像模板放在 `data/templates/`。正式研究产物、cache 和人工套磁状态仍统一放在 `outputs/<school_slug>/<college_slug>/`。
+源码集中在 `src/tutor_recommendation/`；根目录的 `build_teacher_match.py`、`update_teacher_match_with_dblp.py`、`complete_teacher_research.py`、`viewer_server.py` 等文件是命令入口包装器。个人简历、申请材料和本地学生画像放在 `data/private/`，可复用画像模板放在 `data/templates/`。正式研究产物和 cache 放在 `outputs/<school_slug>/<college_slug>/`；跨学院共享的人工套磁状态固定放在 `outputs/contact_status.json`。
 
 本地看板主入口为：
 
@@ -148,6 +148,8 @@ python sync_contact_status_to_workbooks.py
 联系状态列固定为 `套磁情况`、`套磁时间`、`回复情况`、`回复情况备注`。`套磁情况` 允许 `已套磁`、`先不考虑`、`不可能`、`不匹配`；旧 `套磁备注` 和自定义回复文本应迁移到 `回复情况备注`。
 
 最终主表还包含稳定身份与排名审计列，例如 `教师ID`、`身份置信度`、`显式核心锚点`、`评分规则版本`、各证据分项和 `评分警告`。只有强 URL 或邮箱身份可跨阶段稳定复用；目标内 provisional ID 仍表示待复核身份。
+
+看板会用这些结构化列直接展示套磁判断、核心匹配和风险，不会重新评分。旧工作簿缺列时页面会标记“旧数据”；要获得完整的锚点和分来源得分展示，需要按当前 policy 重跑三阶段。
 
 ## Cache 规则
 
