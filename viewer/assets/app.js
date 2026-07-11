@@ -96,6 +96,12 @@ function normalizeStatus(value) {
   return VALID_STATUSES.includes(mapped) ? mapped : "";
 }
 
+function localTodayIso() {
+  const now = new Date();
+  const offset = now.getTimezoneOffset() * 60 * 1000;
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+}
+
 function splitResponses(value) {
   const source = Array.isArray(value) ? value : norm(value).replace(/[；;、,]/g, "|").split("|");
   const seen = new Set();
@@ -798,6 +804,19 @@ function matchCell(row) {
   return cell;
 }
 
+function officialDirectionCell(row) {
+  const cell = document.createElement("td");
+  cell.className = "official-direction-cell";
+  const direction = norm(row["研究方向"]);
+  const text = document.createElement("div");
+  text.className = "official-direction-text";
+  text.textContent = direction || "未提取";
+  cell.title = direction || "教师主页暂未提取到研究方向";
+  if (!direction) cell.classList.add("muted");
+  cell.appendChild(text);
+  return cell;
+}
+
 function reviewCell(row) {
   const cell = document.createElement("td");
   cell.className = "review-cell";
@@ -870,6 +889,7 @@ function renderTable() {
     tr.appendChild(tdPill(row["推荐等级"], levelClass(norm(row["推荐等级"]))));
     tr.appendChild(td(row["匹配分"]));
     tr.appendChild(matchCell(row));
+    tr.appendChild(officialDirectionCell(row));
     tr.appendChild(reviewCell(row));
     tr.appendChild(td(contactSummary(record), "cell-note"));
     fragment.appendChild(tr);
@@ -901,7 +921,10 @@ function updateStatus(key, status) {
   const normalizedStatus = normalizeStatus(status);
   if (normalizedStatus) entry.status = normalizedStatus;
   else delete entry.status;
-  if (normalizedStatus === "已套磁" && !entry.responses?.length) entry.responses = ["已发"];
+  if (normalizedStatus === "已套磁") {
+    if (!entry.contacted_at) entry.contacted_at = localTodayIso();
+    if (!entry.responses?.length) entry.responses = ["已发"];
+  }
   writeContactEntry(record, entry);
   setDirty(true);
   applyFilters();

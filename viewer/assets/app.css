@@ -256,11 +256,16 @@ td:nth-child(6) {
 
 th:nth-child(7),
 td:nth-child(7) {
-  width: 126px;
+  width: 280px;
 }
 
 th:nth-child(8),
 td:nth-child(8) {
+  width: 126px;
+}
+
+th:nth-child(9),
+td:nth-child(9) {
   width: 180px;
 }
 
@@ -280,8 +285,17 @@ td:nth-child(8) {
 }
 
 .institution-cell,
-.match-cell {
+.match-cell,
+.official-direction-cell {
   white-space: normal;
+}
+
+.official-direction-text {
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 
 .table-signals,
@@ -856,7 +870,7 @@ a:hover {
   }
 
   table {
-    min-width: 1040px;
+    min-width: 1320px;
   }
 
   .detail-pane {
