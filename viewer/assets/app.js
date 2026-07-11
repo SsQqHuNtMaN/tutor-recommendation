@@ -30,10 +30,9 @@ const COLLEGE_NAMES = {
   "ruc/ssai": "苏州人工智能学院",
   "fudan/ciram": "智能机器人与先进制造创新学院",
   "fudan/ai": "计算与智能创新学院",
-  "seu/joint": "三院联合导师名单",
-  "seu/cs": "计算机科学系",
-  "seu/ce": "计算机工程系",
-  "seu/imaging": "影像科学与技术系",
+  "seu/cse": "计算机科学与工程学院",
+  "seu/software": "软件学院",
+  "seu/ai": "人工智能学院",
   "tongji/cs": "计算机科学与技术学院",
   "tongji/see": "电子与信息工程学院",
   "ustc/ai_ds": "人工智能与数据科学学院",
@@ -49,6 +48,8 @@ const state = {
   filtered: [],
   selectedKey: "",
   viewMode: "all",
+  calendarMonth: "",
+  dismissedCalendarWarnings: new Set(),
   dirty: false,
   pendingSaves: 0,
   saveFailures: 0,
@@ -77,6 +78,19 @@ const els = {
   hideContacted: $("hideContacted"),
   weakEvidenceOnly: $("weakEvidenceOnly"),
   teacherRows: $("teacherRows"),
+  tablePane: document.querySelector(".table-pane"),
+  content: document.querySelector(".content"),
+  calendarPane: $("calendarPane"),
+  calendarPrev: $("calendarPrev"),
+  calendarToday: $("calendarToday"),
+  calendarNext: $("calendarNext"),
+  calendarMonthLabel: $("calendarMonthLabel"),
+  calendarMonthSummary: $("calendarMonthSummary"),
+  calendarWarnings: $("calendarWarnings"),
+  calendarGrid: $("calendarGrid"),
+  calendarAgenda: $("calendarAgenda"),
+  missingDateCount: $("missingDateCount"),
+  missingDateList: $("missingDateList"),
   detailPane: $("detailPane"),
 };
 
@@ -100,6 +114,32 @@ function localTodayIso() {
   const now = new Date();
   const offset = now.getTimezoneOffset() * 60 * 1000;
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+}
+
+function validDateIso(value) {
+  const text = norm(value).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return "";
+  const date = new Date(`${text}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  const [year, month, day] = text.split("-").map(Number);
+  return date.getFullYear() === year && date.getMonth() + 1 === month && date.getDate() === day ? text : "";
+}
+
+function calendarMonthIso(value = localTodayIso()) {
+  const date = validDateIso(value) || localTodayIso();
+  return `${date.slice(0, 7)}-01`;
+}
+
+function addCalendarMonths(monthIso, offset) {
+  const [year, month] = calendarMonthIso(monthIso).split("-").map(Number);
+  const date = new Date(year, month - 1 + offset, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function formatCalendarDay(dateIso, options = {}) {
+  const valid = validDateIso(dateIso);
+  if (!valid) return "";
+  return new Intl.DateTimeFormat("zh-CN", options).format(new Date(`${valid}T00:00:00`));
 }
 
 function splitResponses(value) {
@@ -263,7 +303,8 @@ function setSummary() {
   const blocked = state.records.filter((record) =>
     ["先不考虑", "不可能", "不匹配"].includes(record.status),
   ).length;
-  const viewLabel = state.viewMode === "contacted" ? "已套磁视图 · " : "";
+  const viewLabels = { contacted: "已套磁视图 · ", calendar: "套磁日历 · " };
+  const viewLabel = viewLabels[state.viewMode] || "";
   els.summary.textContent = total
     ? `${viewLabel}${shown}/${total} 位教师 · 已套磁 ${contacted} · 排除 ${blocked}`
     : "未加载数据";
@@ -584,12 +625,18 @@ function renderViewTabs() {
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", active ? "true" : "false");
   });
-  els.contactFilter.disabled = state.viewMode === "contacted";
-  els.hideContacted.disabled = state.viewMode === "contacted";
+  const contactedView = state.viewMode === "contacted" || state.viewMode === "calendar";
+  els.contactFilter.disabled = contactedView;
+  els.hideContacted.disabled = contactedView;
+  els.tablePane.hidden = state.viewMode === "calendar";
+  els.calendarPane.hidden = state.viewMode !== "calendar";
+  els.content.classList.toggle("calendar-mode", state.viewMode === "calendar");
 }
 
 function setViewMode(viewMode) {
+  if (!['all', 'contacted', 'calendar'].includes(viewMode)) return;
   state.viewMode = viewMode;
+  if (viewMode === "calendar" && !state.calendarMonth) state.calendarMonth = calendarMonthIso();
   renderViewTabs();
   applyFilters();
 }
@@ -645,16 +692,17 @@ function applyFilters() {
   const school = els.schoolFilter.value;
   const college = els.collegeFilter.value;
   const level = els.levelFilter.value;
-  const status = state.viewMode === "contacted" ? "" : els.contactFilter.value;
+  const contactedView = state.viewMode === "contacted" || state.viewMode === "calendar";
+  const status = contactedView ? "" : els.contactFilter.value;
   const minScore = numberValue(els.minScore.value);
   const priorityOnly = els.priorityOnly.checked;
-  const hideMarked = state.viewMode !== "contacted" && els.hideContacted.checked;
+  const hideMarked = !contactedView && els.hideContacted.checked;
   const weakOnly = els.weakEvidenceOnly.checked;
 
   state.filtered = state.records.filter((record) => {
     const row = record.raw;
     if (query && !searchableText(record).includes(query)) return false;
-    if (state.viewMode === "contacted" && record.status !== "已套磁") return false;
+    if (contactedView && record.status !== "已套磁") return false;
     if (hideMarked && record.status) return false;
     if (school && record.schoolName !== school) return false;
     if (college && record.collegeName !== college) return false;
@@ -668,7 +716,7 @@ function applyFilters() {
   if (!state.filtered.some((record) => record.key === state.selectedKey)) {
     state.selectedKey = state.filtered[0]?.key || "";
   }
-  renderTable();
+  renderActiveView();
   renderDetail();
   setSummary();
 }
@@ -840,6 +888,11 @@ function reviewCell(row) {
 
 function affiliationItems(row) {
   return uniqueParts([
+    ["学院归属", row["学院归属"]],
+    ["归属状态", row["学院归属状态"]],
+    ["归属方式", row["学院归属方式"]],
+    ["归属证据", row["学院归属证据"]],
+    ["归属来源", row["学院归属来源"]],
     ["名录研究所", row["名录研究所"]],
     ["主页研究所", row["主页研究所"]],
     ["官方系别", row["官方系别"]],
@@ -895,6 +948,237 @@ function renderTable() {
     fragment.appendChild(tr);
   });
   els.teacherRows.replaceChildren(fragment);
+}
+
+function selectCalendarRecord(key) {
+  if (!state.filtered.some((record) => record.key === key)) return;
+  state.selectedKey = key;
+  renderActiveView();
+  renderDetail();
+  if (window.matchMedia("(max-width: 900px)").matches) {
+    els.detailPane.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function calendarEventButton(record, compact = false) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `calendar-event${record.key === state.selectedKey ? " selected" : ""}${compact ? " compact" : ""}`;
+  button.title = `${norm(record.raw["姓名"])} · ${record.schoolName} · ${record.collegeName}`;
+  const name = document.createElement("span");
+  name.className = "calendar-event-name";
+  name.textContent = norm(record.raw["姓名"]);
+  const institution = document.createElement("span");
+  institution.className = "calendar-event-institution";
+  institution.textContent = `${record.schoolName} · ${record.collegeName}`;
+  button.append(name, institution);
+  button.addEventListener("click", () => selectCalendarRecord(record.key));
+  return button;
+}
+
+function recordsByContactDate(records) {
+  const grouped = new Map();
+  records.forEach((record) => {
+    const date = validDateIso(record.contact?.contacted_at || record.raw[CONTACT_DATE_COLUMN]);
+    if (!date) return;
+    if (!grouped.has(date)) grouped.set(date, []);
+    grouped.get(date).push(record);
+  });
+  grouped.forEach((items) => items.sort((a, b) => norm(a.raw["姓名"]).localeCompare(norm(b.raw["姓名"]), "zh-CN")));
+  return grouped;
+}
+
+function calendarMonthRecords() {
+  const monthPrefix = calendarMonthIso(state.calendarMonth).slice(0, 7);
+  return state.filtered.filter((record) => {
+    const date = validDateIso(record.contact?.contacted_at || record.raw[CONTACT_DATE_COLUMN]);
+    return date.startsWith(monthPrefix);
+  });
+}
+
+function calendarDensityWarnings(records) {
+  const warnings = [];
+  const sameUnit = new Map();
+  records.forEach((record) => {
+    const date = validDateIso(record.contact?.contacted_at || record.raw[CONTACT_DATE_COLUMN]);
+    const key = `${date}|${record.schoolName}|${record.collegeName}`;
+    if (!sameUnit.has(key)) sameUnit.set(key, []);
+    sameUnit.get(key).push(record);
+  });
+  sameUnit.forEach((items, key) => {
+    if (items.length < 3) return;
+    const [date, school, college] = key.split("|");
+    warnings.push({
+      key: `same-unit:${key}`,
+      title: "同日同学院较集中",
+      text: `${formatCalendarDay(date, { month: "long", day: "numeric" })}向${school} · ${college}记录了 ${items.length} 位教师，请确认是否符合发送节奏。`,
+    });
+  });
+
+  const bySchool = new Map();
+  records.forEach((record) => {
+    const date = validDateIso(record.contact?.contacted_at || record.raw[CONTACT_DATE_COLUMN]);
+    if (!bySchool.has(record.schoolName)) bySchool.set(record.schoolName, []);
+    bySchool.get(record.schoolName).push({ date, record });
+  });
+  bySchool.forEach((items, school) => {
+    items.sort((a, b) => a.date.localeCompare(b.date));
+    let best = null;
+    for (let start = 0; start < items.length; start += 1) {
+      const startTime = new Date(`${items[start].date}T00:00:00`).getTime();
+      let end = start;
+      while (end + 1 < items.length) {
+        const nextTime = new Date(`${items[end + 1].date}T00:00:00`).getTime();
+        if (nextTime - startTime > 6 * 24 * 60 * 60 * 1000) break;
+        end += 1;
+      }
+      const count = end - start + 1;
+      if (count >= 5 && (!best || count > best.count)) best = { start, end, count };
+    }
+    if (!best) return;
+    const first = items[best.start].date;
+    const last = items[best.end].date;
+    warnings.push({
+      key: `school-window:${school}:${first}:${last}`,
+      title: "短期内同校发送较密集",
+      text: `${formatCalendarDay(first, { month: "numeric", day: "numeric" })}—${formatCalendarDay(last, { month: "numeric", day: "numeric" })}向${school}记录了 ${best.count} 位教师，仅作节奏提醒。`,
+    });
+  });
+  return warnings;
+}
+
+function renderCalendarWarnings(records) {
+  const fragment = document.createDocumentFragment();
+  calendarDensityWarnings(records)
+    .filter((warning) => !state.dismissedCalendarWarnings.has(warning.key))
+    .forEach((warning) => {
+      const node = document.createElement("div");
+      node.className = "calendar-warning";
+      const copy = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = warning.title;
+      const text = document.createElement("span");
+      text.textContent = warning.text;
+      copy.append(title, text);
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "calendar-warning-close";
+      close.textContent = "关闭";
+      close.addEventListener("click", () => {
+        state.dismissedCalendarWarnings.add(warning.key);
+        renderCalendarWarnings(records);
+      });
+      node.append(copy, close);
+      fragment.appendChild(node);
+    });
+  els.calendarWarnings.replaceChildren(fragment);
+}
+
+function renderCalendarGrid(grouped) {
+  const [year, month] = calendarMonthIso(state.calendarMonth).split("-").map(Number);
+  const first = new Date(year, month - 1, 1);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const leading = (first.getDay() + 6) % 7;
+  const today = localTodayIso();
+  const fragment = document.createDocumentFragment();
+  ["一", "二", "三", "四", "五", "六", "日"].forEach((label) => {
+    const header = document.createElement("div");
+    header.className = "calendar-weekday";
+    header.textContent = label;
+    fragment.appendChild(header);
+  });
+  const cellCount = Math.ceil((leading + daysInMonth) / 7) * 7;
+  for (let index = 0; index < cellCount; index += 1) {
+    const day = index - leading + 1;
+    const cell = document.createElement("section");
+    cell.className = "calendar-day";
+    if (day < 1 || day > daysInMonth) {
+      cell.classList.add("outside-month");
+      cell.setAttribute("aria-hidden", "true");
+      fragment.appendChild(cell);
+      continue;
+    }
+    const date = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (date === today) cell.classList.add("today");
+    const events = grouped.get(date) || [];
+    const head = document.createElement("div");
+    head.className = "calendar-day-head";
+    const number = document.createElement("span");
+    number.className = "calendar-day-number";
+    number.textContent = String(day);
+    head.appendChild(number);
+    if (events.length) {
+      const count = document.createElement("span");
+      count.className = "count-badge";
+      count.textContent = String(events.length);
+      head.appendChild(count);
+    }
+    const list = document.createElement("div");
+    list.className = "calendar-day-events";
+    events.forEach((record) => list.appendChild(calendarEventButton(record, true)));
+    cell.append(head, list);
+    fragment.appendChild(cell);
+  }
+  els.calendarGrid.replaceChildren(fragment);
+}
+
+function renderCalendarAgenda(grouped) {
+  const monthPrefix = calendarMonthIso(state.calendarMonth).slice(0, 7);
+  const dates = [...grouped.keys()].filter((date) => date.startsWith(monthPrefix)).sort();
+  const fragment = document.createDocumentFragment();
+  if (!dates.length) {
+    const empty = document.createElement("div");
+    empty.className = "calendar-empty";
+    empty.textContent = "本月没有符合当前筛选条件的套磁记录";
+    fragment.appendChild(empty);
+  }
+  dates.forEach((date) => {
+    const section = document.createElement("section");
+    section.className = "agenda-day";
+    const heading = document.createElement("div");
+    heading.className = "agenda-day-heading";
+    heading.textContent = formatCalendarDay(date, { month: "long", day: "numeric", weekday: "short" });
+    const list = document.createElement("div");
+    list.className = "agenda-events";
+    (grouped.get(date) || []).forEach((record) => list.appendChild(calendarEventButton(record)));
+    section.append(heading, list);
+    fragment.appendChild(section);
+  });
+  els.calendarAgenda.replaceChildren(fragment);
+}
+
+function renderMissingDates() {
+  const missing = state.filtered
+    .filter((record) => !validDateIso(record.contact?.contacted_at || record.raw[CONTACT_DATE_COLUMN]))
+    .sort(compareRecords);
+  els.missingDateCount.textContent = String(missing.length);
+  const fragment = document.createDocumentFragment();
+  if (!missing.length) {
+    const empty = document.createElement("div");
+    empty.className = "calendar-empty compact";
+    empty.textContent = "没有缺少日期的已套磁记录";
+    fragment.appendChild(empty);
+  }
+  missing.forEach((record) => fragment.appendChild(calendarEventButton(record)));
+  els.missingDateList.replaceChildren(fragment);
+}
+
+function renderCalendar() {
+  if (!state.calendarMonth) state.calendarMonth = calendarMonthIso();
+  const monthRecords = calendarMonthRecords();
+  const grouped = recordsByContactDate(state.filtered);
+  const [year, month] = calendarMonthIso(state.calendarMonth).split("-").map(Number);
+  els.calendarMonthLabel.textContent = `${year}年${month}月`;
+  els.calendarMonthSummary.textContent = `本月 ${monthRecords.length} 位 · 当前筛选共 ${state.filtered.length} 位已套磁教师`;
+  renderCalendarWarnings(monthRecords);
+  renderCalendarGrid(grouped);
+  renderCalendarAgenda(grouped);
+  renderMissingDates();
+}
+
+function renderActiveView() {
+  if (state.viewMode === "calendar") renderCalendar();
+  else renderTable();
 }
 
 function td(value, className = "") {
@@ -955,9 +1239,11 @@ function updateContactMeta(key, patch, refresh = false) {
   const entry = normalizeContactEntry({ ...(record.contact || {}), ...patch });
   writeContactEntry(record, entry);
   setDirty(true);
-  renderTable();
-  setSummary();
-  if (refresh) renderDetail();
+  if (refresh) applyFilters();
+  else {
+    renderActiveView();
+    setSummary();
+  }
 }
 
 function currentRecord() {
@@ -1310,6 +1596,18 @@ function bindEvents() {
     if (!button) return;
     setViewMode(button.dataset.view);
   });
+  els.calendarPrev.addEventListener("click", () => {
+    state.calendarMonth = addCalendarMonths(state.calendarMonth, -1);
+    renderCalendar();
+  });
+  els.calendarToday.addEventListener("click", () => {
+    state.calendarMonth = calendarMonthIso();
+    renderCalendar();
+  });
+  els.calendarNext.addEventListener("click", () => {
+    state.calendarMonth = addCalendarMonths(state.calendarMonth, 1);
+    renderCalendar();
+  });
   els.schoolFilter.addEventListener("input", () => {
     populateCollegeFilter();
     applyFilters();
@@ -1332,6 +1630,7 @@ function bindEvents() {
 }
 
 async function init() {
+  state.calendarMonth = calendarMonthIso();
   bindEvents();
   populateFilters();
   renderViewTabs();

@@ -33,6 +33,7 @@
       <nav id="viewTabs" class="view-tabs" aria-label="视图">
         <button type="button" data-view="all" class="active" aria-pressed="true">全部教师</button>
         <button type="button" data-view="contacted" aria-pressed="false">已套磁</button>
+        <button type="button" data-view="calendar" aria-pressed="false">套磁日历</button>
       </nav>
 
       <section class="filters" aria-label="筛选">
@@ -74,6 +75,29 @@
             </thead>
             <tbody id="teacherRows"></tbody>
           </table>
+        </div>
+        <div id="calendarPane" class="calendar-pane" hidden>
+          <div class="calendar-toolbar">
+            <div class="calendar-navigation" aria-label="月份导航">
+              <button id="calendarPrev" type="button" title="上个月">上月</button>
+              <button id="calendarToday" type="button">今天</button>
+              <button id="calendarNext" type="button" title="下个月">下月</button>
+            </div>
+            <div>
+              <h2 id="calendarMonthLabel" class="calendar-month-label"></h2>
+              <div id="calendarMonthSummary" class="calendar-month-summary"></div>
+            </div>
+          </div>
+          <div id="calendarWarnings" class="calendar-warnings" aria-live="polite"></div>
+          <div id="calendarGrid" class="calendar-grid" aria-label="套磁月历"></div>
+          <div id="calendarAgenda" class="calendar-agenda" aria-label="套磁议程"></div>
+          <section class="missing-date-section">
+            <div class="missing-date-heading">
+              <h2>待补套磁日期</h2>
+              <span id="missingDateCount" class="count-badge">0</span>
+            </div>
+            <div id="missingDateList" class="missing-date-list"></div>
+          </section>
         </div>
         <aside id="detailPane" class="detail-pane">
           <div class="empty-detail">选择一位教师</div>
