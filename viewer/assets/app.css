@@ -224,6 +224,32 @@ h1 {
   margin-bottom: 12px;
 }
 
+.calendar-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.calendar-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.calendar-legend-item i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .calendar-warning {
   display: flex;
   align-items: flex-start;
@@ -350,14 +376,60 @@ h1 {
   white-space: normal;
 }
 
+.response-sent {
+  color: #1769aa;
+  background: #edf6ff;
+}
+
+.response-official {
+  color: #087f8c;
+  background: #e8f8f8;
+}
+
+.response-wechat {
+  color: #18794e;
+  background: #edf9f1;
+}
+
+.response-interview {
+  color: #6f42c1;
+  background: #f4effd;
+}
+
+.response-assessment {
+  color: #a45100;
+  background: #fff4e5;
+}
+
+.response-full {
+  color: #b42318;
+  background: #fff0ee;
+}
+
+.response-unset {
+  color: #52636c;
+  background: #f3f6f7;
+}
+
+.calendar-event.response-sent,
+.calendar-event.response-official,
+.calendar-event.response-wechat,
+.calendar-event.response-interview,
+.calendar-event.response-assessment,
+.calendar-event.response-full,
+.calendar-event.response-unset {
+  border-color: currentColor;
+}
+
 .calendar-event.compact {
   min-height: 34px;
   padding: 4px 6px;
 }
 
 .calendar-event.selected {
-  border-color: var(--blue);
-  background: var(--soft-blue);
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px rgba(28, 96, 145, 0.1);
 }
 
 .calendar-event-name {
@@ -374,6 +446,16 @@ h1 {
   font-size: 11px;
   line-height: 1.25;
   text-overflow: ellipsis;
+}
+
+.calendar-event-response {
+  margin-top: 3px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.2;
 }
 
 .calendar-agenda {

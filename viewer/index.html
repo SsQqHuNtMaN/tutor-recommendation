@@ -32,7 +32,6 @@
 
       <nav id="viewTabs" class="view-tabs" aria-label="视图">
         <button type="button" data-view="all" class="active" aria-pressed="true">全部教师</button>
-        <button type="button" data-view="contacted" aria-pressed="false">已套磁</button>
         <button type="button" data-view="calendar" aria-pressed="false">套磁日历</button>
       </nav>
 
@@ -44,8 +43,8 @@
         <select id="contactFilter"></select>
         <input id="minScore" type="number" min="0" step="1" placeholder="最低分" />
         <label class="check-line">
-          <input id="priorityOnly" type="checkbox" />
-          <span>只看套磁名单</span>
+          <input id="contactedOnly" type="checkbox" />
+          <span>查看已套磁</span>
         </label>
         <label class="check-line">
           <input id="hideContacted" type="checkbox" />
@@ -87,6 +86,15 @@
               <h2 id="calendarMonthLabel" class="calendar-month-label"></h2>
               <div id="calendarMonthSummary" class="calendar-month-summary"></div>
             </div>
+          </div>
+          <div class="calendar-legend" aria-label="回复情况图例">
+            <span class="calendar-legend-item response-sent"><i></i>已发</span>
+            <span class="calendar-legend-item response-official"><i></i>官回</span>
+            <span class="calendar-legend-item response-wechat"><i></i>添加微信</span>
+            <span class="calendar-legend-item response-interview"><i></i>约面试</span>
+            <span class="calendar-legend-item response-assessment"><i></i>考核</span>
+            <span class="calendar-legend-item response-full"><i></i>已满</span>
+            <span class="calendar-legend-item response-unset"><i></i>未记录</span>
           </div>
           <div id="calendarWarnings" class="calendar-warnings" aria-live="polite"></div>
           <div id="calendarGrid" class="calendar-grid" aria-label="套磁月历"></div>

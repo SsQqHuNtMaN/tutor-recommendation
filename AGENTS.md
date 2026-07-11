@@ -70,6 +70,8 @@ directory into auditable teacher recommendation workbooks:
   contact calendar, and mobile agenda.
 - `docs/hermes-agent-evaluation-2026-07-11.md`: Agent-shell and orchestration
   evaluation for Hermes and alternatives.
+- `docs/viewer-integrated-layout-todo.md`: approved follow-up plan for placing
+  the calendar above the teacher list and collapsible detail sidebar.
 - Root `*.py` files are thin CLI wrappers that add `src` to `sys.path`.
 
 ## Common Commands

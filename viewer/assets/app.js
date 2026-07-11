@@ -74,7 +74,7 @@ const els = {
   levelFilter: $("levelFilter"),
   contactFilter: $("contactFilter"),
   minScore: $("minScore"),
-  priorityOnly: $("priorityOnly"),
+  contactedOnly: $("contactedOnly"),
   hideContacted: $("hideContacted"),
   weakEvidenceOnly: $("weakEvidenceOnly"),
   teacherRows: $("teacherRows"),
@@ -153,6 +153,27 @@ function splitResponses(value) {
     responses.push(response);
   });
   return responses;
+}
+
+const CALENDAR_RESPONSE_STYLES = {
+  已发: "response-sent",
+  官回: "response-official",
+  添加微信: "response-wechat",
+  约面试: "response-interview",
+  考核: "response-assessment",
+  已满: "response-full",
+};
+
+const CALENDAR_RESPONSE_PRIORITY = ["已满", "考核", "约面试", "添加微信", "官回", "已发"];
+
+function calendarResponseState(record) {
+  const responses = splitResponses(record.contact?.responses || record.raw[CONTACT_RESPONSE_COLUMN]);
+  const primary = CALENDAR_RESPONSE_PRIORITY.find((response) => responses.includes(response)) || "";
+  return {
+    responses,
+    primary,
+    className: CALENDAR_RESPONSE_STYLES[primary] || "response-unset",
+  };
 }
 
 function joinResponses(value) {
@@ -303,7 +324,7 @@ function setSummary() {
   const blocked = state.records.filter((record) =>
     ["先不考虑", "不可能", "不匹配"].includes(record.status),
   ).length;
-  const viewLabels = { contacted: "已套磁视图 · ", calendar: "套磁日历 · " };
+  const viewLabels = { calendar: "套磁日历 · " };
   const viewLabel = viewLabels[state.viewMode] || "";
   els.summary.textContent = total
     ? `${viewLabel}${shown}/${total} 位教师 · 已套磁 ${contacted} · 排除 ${blocked}`
@@ -625,16 +646,13 @@ function renderViewTabs() {
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", active ? "true" : "false");
   });
-  const contactedView = state.viewMode === "contacted" || state.viewMode === "calendar";
-  els.contactFilter.disabled = contactedView;
-  els.hideContacted.disabled = contactedView;
   els.tablePane.hidden = state.viewMode === "calendar";
   els.calendarPane.hidden = state.viewMode !== "calendar";
   els.content.classList.toggle("calendar-mode", state.viewMode === "calendar");
 }
 
 function setViewMode(viewMode) {
-  if (!['all', 'contacted', 'calendar'].includes(viewMode)) return;
+  if (!["all", "calendar"].includes(viewMode)) return;
   state.viewMode = viewMode;
   if (viewMode === "calendar" && !state.calendarMonth) state.calendarMonth = calendarMonthIso();
   renderViewTabs();
@@ -692,24 +710,22 @@ function applyFilters() {
   const school = els.schoolFilter.value;
   const college = els.collegeFilter.value;
   const level = els.levelFilter.value;
-  const contactedView = state.viewMode === "contacted" || state.viewMode === "calendar";
-  const status = contactedView ? "" : els.contactFilter.value;
+  const status = els.contactFilter.value;
   const minScore = numberValue(els.minScore.value);
-  const priorityOnly = els.priorityOnly.checked;
-  const hideMarked = !contactedView && els.hideContacted.checked;
+  const contactedOnly = els.contactedOnly.checked;
+  const hideMarked = els.hideContacted.checked;
   const weakOnly = els.weakEvidenceOnly.checked;
 
   state.filtered = state.records.filter((record) => {
     const row = record.raw;
     if (query && !searchableText(record).includes(query)) return false;
-    if (contactedView && record.status !== "已套磁") return false;
+    if (contactedOnly && record.status !== "已套磁") return false;
     if (hideMarked && record.status) return false;
     if (school && record.schoolName !== school) return false;
     if (college && record.collegeName !== college) return false;
     if (level && norm(row["推荐等级"]) !== level) return false;
     if (status && record.status !== status) return false;
     if (minScore && numberValue(row["匹配分"]) < minScore) return false;
-    if (priorityOnly && norm(row["是否建议套磁"]) !== "是") return false;
     if (weakOnly && !isWeakEvidence(record)) return false;
     return true;
   });
@@ -963,15 +979,22 @@ function selectCalendarRecord(key) {
 function calendarEventButton(record, compact = false) {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = `calendar-event${record.key === state.selectedKey ? " selected" : ""}${compact ? " compact" : ""}`;
-  button.title = `${norm(record.raw["姓名"])} · ${record.schoolName} · ${record.collegeName}`;
+  const responseState = calendarResponseState(record);
+  button.className = `calendar-event ${responseState.className}${record.key === state.selectedKey ? " selected" : ""}${compact ? " compact" : ""}`;
+  const responseText = responseState.responses.join(" · ") || "未记录回复";
+  button.title = `${norm(record.raw["姓名"])} · ${record.schoolName} · ${record.collegeName} · ${responseText}`;
   const name = document.createElement("span");
   name.className = "calendar-event-name";
   name.textContent = norm(record.raw["姓名"]);
   const institution = document.createElement("span");
   institution.className = "calendar-event-institution";
   institution.textContent = `${record.schoolName} · ${record.collegeName}`;
-  button.append(name, institution);
+  const response = document.createElement("span");
+  response.className = "calendar-event-response";
+  response.textContent = compact && responseState.responses.length > 1
+    ? `${responseState.primary} +${responseState.responses.length - 1}`
+    : responseText;
+  button.append(name, institution, response);
   button.addEventListener("click", () => selectCalendarRecord(record.key));
   return button;
 }
@@ -1149,7 +1172,11 @@ function renderCalendarAgenda(grouped) {
 
 function renderMissingDates() {
   const missing = state.filtered
-    .filter((record) => !validDateIso(record.contact?.contacted_at || record.raw[CONTACT_DATE_COLUMN]))
+    .filter(
+      (record) =>
+        record.status === "已套磁" &&
+        !validDateIso(record.contact?.contacted_at || record.raw[CONTACT_DATE_COLUMN]),
+    )
     .sort(compareRecords);
   els.missingDateCount.textContent = String(missing.length);
   const fragment = document.createDocumentFragment();
@@ -1169,7 +1196,7 @@ function renderCalendar() {
   const grouped = recordsByContactDate(state.filtered);
   const [year, month] = calendarMonthIso(state.calendarMonth).split("-").map(Number);
   els.calendarMonthLabel.textContent = `${year}年${month}月`;
-  els.calendarMonthSummary.textContent = `本月 ${monthRecords.length} 位 · 当前筛选共 ${state.filtered.length} 位已套磁教师`;
+  els.calendarMonthSummary.textContent = `本月 ${monthRecords.length} 条日程 · 当前筛选共 ${state.filtered.length} 位教师`;
   renderCalendarWarnings(monthRecords);
   renderCalendarGrid(grouped);
   renderCalendarAgenda(grouped);
@@ -1618,7 +1645,7 @@ function bindEvents() {
     els.levelFilter,
     els.contactFilter,
     els.minScore,
-    els.priorityOnly,
+    els.contactedOnly,
     els.hideContacted,
     els.weakEvidenceOnly,
   ].forEach((element) => element.addEventListener("input", applyFilters));

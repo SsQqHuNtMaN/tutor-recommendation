@@ -42,7 +42,6 @@ echo Using Python: %PYTHON_BIN%
 if not errorlevel 1 (
   echo Teacher viewer is already running: %URL%
   if "%VIEWER_NO_BROWSER%" neq "1" start "" "%URL%"
-  call :open_codex
   exit /b 0
 )
 
@@ -56,26 +55,10 @@ if not errorlevel 1 (
 
 echo Starting teacher viewer: %URL%
 if "%VIEWER_NO_BROWSER%" neq "1" start "" powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; Start-Process '%URL%'"
-call :open_codex
 "%PYTHON_BIN%" viewer_server.py --host "%HOST%" --port "%PORT%"
 
 if errorlevel 1 pause
 exit /b %ERRORLEVEL%
-
-:open_codex
-if "%VIEWER_NO_CODEX%"=="1" exit /b 0
-where codex.cmd >nul 2>nul
-if errorlevel 1 (
-  where codex >nul 2>nul
-  if errorlevel 1 (
-    echo Codex CLI was not found on PATH. The viewer will still start.
-    echo Install Codex or add it to PATH, then run:
-    echo   codex
-    exit /b 0
-  )
-)
-start "Codex - tutor_recommendation" powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "Set-Location -LiteralPath '%CD%'; codex"
-exit /b 0
 
 :try_python
 if defined PYTHON_BIN exit /b 0
