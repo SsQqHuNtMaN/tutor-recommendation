@@ -1901,8 +1901,8 @@ def parse_seu_profile_detail(session: requests.Session, row: dict[str, Any], dep
         mentor_types = [mentor_types]
     detail["名录序号"] = row.get("名录序号", "")
     detail["职称"] = norm_text(row.get("职称"))
-    detail["名录研究所"] = norm_text(row.get("官方系别")) or "三院联合导师名单"
-    detail["主页研究所"] = norm_text(row.get("官方系别")) or "三院联合导师名单"
+    detail["名录研究所"] = norm_text(row.get("官方系别")) or "院系待确认"
+    detail["主页研究所"] = norm_text(row.get("官方系别")) or "院系待确认"
     detail["所内职务"] = unique_join(mentor_types + ["兼职" if row.get("是否兼职") else ""])
     if not valid_http_url(profile_url):
         detail["抓取状态"] = "无独立主页"
@@ -1948,8 +1948,8 @@ def parse_seu_profile_detail(session: requests.Session, row: dict[str, Any], dep
     detail["抓取状态"] = "成功"
     detail["职称"] = title or norm_text(row.get("职称"))
     detail["官方系别"] = department
-    detail["名录研究所"] = department or "三院联合导师名单"
-    detail["主页研究所"] = department or norm_text(row.get("官方系别")) or "三院联合导师名单"
+    detail["名录研究所"] = department or "院系待确认"
+    detail["主页研究所"] = department or norm_text(row.get("官方系别")) or "院系待确认"
     detail["邮箱"] = extract_email(email) or extract_email(profile_text)
     detail["电话"] = extract_phone(profile_text)
     detail["地址"] = ""
@@ -1974,13 +1974,13 @@ def fetch_seu_directory(session: requests.Session, config: TargetConfig) -> list
             "显示姓名": row.get("显示姓名", ""),
             "职称": "",
             "教师主页链接": row.get("教师主页链接", ""),
-            "名录研究所": official_department or "三院联合导师名单",
+            "名录研究所": official_department or "院系待确认",
             "所内职务": unique_join(row.get("导师类型", [])),
             "邮箱": "",
             "电话": "",
             "地址": "",
             "个人主页": "",
-            "主页研究所": official_department or "三院联合导师名单",
+            "主页研究所": official_department or "院系待确认",
             "官方系别": official_department,
             "导师类型": row.get("导师类型", []),
             "研究方向": "",
@@ -1989,8 +1989,6 @@ def fetch_seu_directory(session: requests.Session, config: TargetConfig) -> list
             "是否兼职": row.get("是否兼职", ""),
         }
         detail = parse_seu_profile_detail(session, base_row, department_map)
-        if config.key == "seu_joint" and norm_text(detail.get("官方系别")) in set(SEU_TARGET_DEPARTMENTS.values()):
-            continue
         if target_department and norm_text(detail.get("官方系别")) != target_department:
             continue
         detail["名录序号"] = len(rows) + 1
@@ -3435,7 +3433,7 @@ def fetch_target_rows(config: TargetConfig) -> list[dict[str, Any]]:
         rows = fetch_fudan_ciram_directory(session, config)
     elif config.key == "fudan_ai":
         rows = fetch_fudan_ai_directory(session, config)
-    elif config.key in {"seu_joint", "seu_cs", "seu_ce", "seu_imaging"}:
+    elif config.key in {"seu_cs", "seu_ce", "seu_imaging"}:
         rows = fetch_seu_directory(session, config)
     elif config.key == "tongji_cs":
         rows = fetch_tongji_cs_directory(session, config)

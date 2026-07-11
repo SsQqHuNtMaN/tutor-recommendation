@@ -30,7 +30,6 @@ const COLLEGE_NAMES = {
   "ruc/ssai": "苏州人工智能学院",
   "fudan/ciram": "智能机器人与先进制造创新学院",
   "fudan/ai": "计算与智能创新学院",
-  "seu/joint": "三院联合导师名单",
   "seu/cs": "计算机科学系",
   "seu/ce": "计算机工程系",
   "seu/imaging": "影像科学与技术系",

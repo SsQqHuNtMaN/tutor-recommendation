@@ -26,7 +26,6 @@ TARGET_BUILDERS: dict[str, Callable[[], None]] = {
     "nju_ic": lambda: _build_configured_target("nju_ic"),
     "fudan_ciram": lambda: _build_configured_target("fudan_ciram"),
     "fudan_ai": lambda: _build_configured_target("fudan_ai"),
-    "seu_joint": lambda: _build_configured_target("seu_joint"),
     "seu_cs": lambda: _build_configured_target("seu_cs"),
     "seu_ce": lambda: _build_configured_target("seu_ce"),
     "seu_imaging": lambda: _build_configured_target("seu_imaging"),

@@ -155,16 +155,6 @@ TARGETS: dict[str, TargetConfig] = {
         affiliation_keywords=("fudan university", "fudan"),
         dedup_priority=40,
     ),
-    "seu_joint": TargetConfig(
-        key="seu_joint",
-        school_slug="seu",
-        college_slug="joint",
-        school_name="东南大学",
-        college_name="三院联合导师名单",
-        directory_url="https://cse.seu.edu.cn/dsxx/list.htm",
-        affiliation_keywords=("southeast university", "seu"),
-        dedup_priority=80,
-    ),
     "seu_cs": TargetConfig(
         key="seu_cs",
         school_slug="seu",
