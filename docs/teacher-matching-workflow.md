@@ -90,6 +90,7 @@ python build_teacher_match.py <target>
 - `命中关键词`
 - `推荐理由`
 - `去重备注`
+- 可选多学院模型列：`学院归属`、`学院归属状态`、`学院归属方式`、`学院归属证据`、`学院归属来源`
 
 稳定列名能让 DBLP、arXiv、WebSearch 和本地看板复用同一套后续流程。
 
@@ -106,6 +107,7 @@ python build_teacher_match.py <target>
 
 ```powershell
 python build_teacher_match.py zju_ai zju_cs zju_uiuc zju_cse
+python build_teacher_match.py seu_cse seu_software seu_ai
 ```
 
 批量构建会先分别抓取各目标，再按目标优先级做跨目标去重。去重规则：
@@ -114,6 +116,8 @@ python build_teacher_match.py zju_ai zju_cs zju_uiuc zju_cse
 - 学校首页、学院列表页、统一登录页、实验室首页、带 `#姓名` 的目录锚点等只作为证据，不作为身份键。
 - 不在同一个目标内按姓名合并，避免把同名老师误合并。
 - 不同目标之间只有共享强身份 URL 才自动合并；同校同名但缺少正身份信号时两行都保留，并写入待人工复核备注。
+- 明确配置为同一 `cross_target_overlap_group` 的目标用于真实多学院归属：共享强身份的导师在官方归属证据支持下可保留在多个目标，并共享稳定教师 ID。
+- 学院归属只使用官方导师名单、招生材料、教师主页或人工复核记录；不按研究方向推断，证据不足时标记待复核。
 - 被合并到保留行的来源会写入 `去重备注`。
 
 ## 5. 主页解析原则
@@ -264,6 +268,8 @@ outputs/contact_status.json
 JSON 是本地编辑状态源；Excel 是查看和交付产物。
 
 看板直接消费工作簿中的 `是否建议套磁`、`推荐等级`、`匹配分`、`命中关键词`、`显式核心锚点`、各来源证据分和 `评分警告`，不在前端重新计算推荐。列表把核心匹配和锚点/风险放在首屏；详情将官方方向与 DBLP、arXiv、已知网页和 WebSearch 辅助信号分层展示，证据明细默认折叠。旧工作簿缺少结构化 policy 字段时只标记为旧数据，不从论文数量或综合方向文本推断新结论。
+
+套磁日历与表格共用教师 ID、筛选条件和 `contact_status.json`。桌面使用月历，移动端使用日期议程；缺日期记录单独列出，密集发送提醒只辅助安排且可关闭。点击条目进入同一教师详情，日期编辑成功后立即刷新日历。
 
 看板只监听 loopback，写接口要求进程级会话令牌、同源 Host/Origin 和 JSON 请求体限制。损坏的 `contact_status.json` 会显式报错，不会被当作空状态静默覆盖。
 

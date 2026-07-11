@@ -46,6 +46,8 @@ directory into auditable teacher recommendation workbooks:
 - `data/templates/student_profile.example.json`: public placeholder profile.
 - `data/templates/dblp_overrides.example.json`: public DBLP override format.
 - `data/templates/web_search_curated.example.json`: public curated search format.
+- `data/templates/seu_college_affiliations.example.json`: public SEU
+  multi-college affiliation override format.
 - `src/tutor_recommendation/student_profile.py`: loads local profile data from
   `data/private/student_profile.json` or `STUDENT_PROFILE_PATH`.
 - `src/tutor_recommendation/ranking_policy.py`: unified scoring, anchor, and
@@ -64,7 +66,10 @@ directory into auditable teacher recommendation workbooks:
 - `src/tutor_recommendation/supplement_web_search_research.py`: optional
   bounded web-search supplement.
 - `src/tutor_recommendation/contact_status.py`: local contact-state schema.
-- `src/tutor_recommendation/viewer_server.py` and `viewer/`: local dashboard.
+- `src/tutor_recommendation/viewer_server.py` and `viewer/`: local dashboard,
+  contact calendar, and mobile agenda.
+- `docs/hermes-agent-evaluation-2026-07-11.md`: Agent-shell and orchestration
+  evaluation for Hermes and alternatives.
 - Root `*.py` files are thin CLI wrappers that add `src` to `sys.path`.
 
 ## Common Commands
@@ -180,11 +185,18 @@ Valid contact statuses are `已套磁`, `先不考虑`, `不可能`, and `不匹
   direction, team, and source columns when a target exposes such attachments.
 - Overlapping targets from the same university should be built in one
   `build_teacher_match.py` command so cross-target de-duplication can run.
+- Targets in the same explicit `cross_target_overlap_group` may preserve the
+  same stable teacher ID across multiple colleges when official affiliation
+  evidence supports a real multi-college relationship. SEU CSE, Software, and
+  AI use this model.
 - De-duplication only auto-merges strong person identity URLs. Same-school,
   same-name rows without positive identity evidence stay separate and are
   marked for review. Do not merge by name inside a single target.
 - Generic directory pages, login pages, lab homepages, and anchor-only list
   pages must not be treated as person identity URLs.
+- College affiliation must come from official rosters, admissions material,
+  teacher pages, or a local reviewed override. Never infer affiliation from a
+  research direction; unresolved records stay marked for review.
 - Generic AI, LLM, NLP, multimodal, and agent terms should not drive matching
   unless the loaded profile assigns them meaningful weight.
 - DBLP high-confidence matches can strengthen ranking only when homepage,

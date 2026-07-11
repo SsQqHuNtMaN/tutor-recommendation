@@ -101,9 +101,18 @@ python build_teacher_match.py --all
 python build_teacher_match.py zju_ai zju_cs zju_uiuc zju_cse
 python build_teacher_match.py fudan_ciram fudan_ai
 python build_teacher_match.py nju_cs nju_ai nju_is
+python build_teacher_match.py seu_cse seu_software seu_ai
 ```
 
-跨目标去重只使用个人主页/教师主页强身份键。同校同名但没有共享正身份信号时保留两行并标记人工复核；目录页、登录页、实验室首页和带 `#姓名` 的列表锚点不会被当作个人身份键。
+跨目标去重只使用个人主页/教师主页强身份键。同校同名但没有共享正身份信号时保留两行并标记人工复核；目录页、登录页、实验室首页和带 `#姓名` 的列表锚点不会被当作个人身份键。显式配置为同一 `cross_target_overlap_group` 的目标例外：如果官方证据表明导师确实属于多个学院，则保留相同稳定教师 ID 的多条学院成员关系，而不是删除其中一条。
+
+东南大学三学院归属的本地人工复核文件为：
+
+```text
+data/private/seu_college_affiliations.json
+```
+
+可从 `data/templates/seu_college_affiliations.example.json` 复制。学院归属只能来自官方导师名单、招生材料、教师主页或人工确认记录，不得按研究方向猜测；证据不足时保留为待复核。
 
 ## 5. DBLP 设置
 
@@ -222,6 +231,8 @@ outputs/contact_status.json
 
 “全部教师”视图应用完整筛选条件；“已套磁”视图只显示 `套磁情况=已套磁` 的教师，并禁用套磁状态筛选和“隐藏已标记”。后者会隐藏所有非空状态，包括 `先不考虑`、`不可能` 和 `不匹配`，不要与“已套磁”视图混用。
 
+“套磁日历”复用当前学校、学院和其他筛选。桌面显示七列月历，移动端显示按日期排列的议程；可用上月、今天、下月导航。日历会列出缺少 `套磁时间` 的已套磁记录，并对同日同学院集中发送、七天内同校密集发送给出可关闭的非阻断提醒。点击教师条目打开现有详情；修改日期后日历立即更新并写入同一份 `contact_status.json`。
+
 首次把一位教师切换为“已套磁”时，如果 `套磁时间` 为空，看板会按浏览器所在机器的本地日期自动填写当天，并默认加入回复状态“已发”。手工填写过的日期和已有回复状态不会被覆盖。
 
 看板不在 JavaScript 中重新评分，只读取工作簿里的 policy 结果。尚未重跑的旧工作簿如果缺少 `显式核心锚点`、`评分规则版本` 或分来源得分，会标记为“旧数据”并回退显示已有证据概览；需要完整判断时应重跑三阶段，而不是在前端补推断。
@@ -254,7 +265,7 @@ python sync_contact_status_to_workbooks.py
 - DBLP 歧义、未匹配或抓取失败的高价值候选是否人工看过。
 - 每位推荐教师都有可读 `推荐理由`。
 - 输出、cache 和 checkpoint 是否都在 `outputs/<school_slug>/<college_slug>/`。
-- 对重叠学院运行跨目标重复审计：强身份 URL 不应重复；剩余同校同名项应能解释为不同人或待人工复核。
+- 对重叠学院运行跨目标重复审计：普通目标的强身份 URL 不应重复；显式 overlap group 中保留的重复应有多学院归属证据；剩余同校同名项应能解释为不同人或待人工复核。
 - PDF 附件目标是否生成了 `pdf_cache/`，且 `导师信息库PDF` 等来源列可回溯。
 - 真实简历、画像、结果表、cache、联系状态和私有交接资料是否未被 Git 跟踪。
 

@@ -77,3 +77,4 @@ docs/private/project-context.local.md
 - [运行手册](runbook.md)
 - [工作流方法论](teacher-matching-workflow.md)
 - [输出目录规则](output-organization.md)
+- [Hermes Agent 等方案适配调查](hermes-agent-evaluation-2026-07-11.md)

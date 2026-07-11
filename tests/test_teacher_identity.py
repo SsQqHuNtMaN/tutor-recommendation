@@ -57,6 +57,28 @@ class TeacherIdentityTests(unittest.TestCase):
 
         self.assertNotEqual(first, second)
 
+    def test_fudan_list_style_teacher_pages_are_distinct(self) -> None:
+        first = teacher_id_for_row(
+            "fudan",
+            "ai",
+            {
+                "姓名": "Example",
+                "教师主页链接": "http://ai.fudan.edu.cn/zk/list.htm",
+                "邮箱": "shared@fudan.edu.cn",
+            },
+        )
+        second = teacher_id_for_row(
+            "fudan",
+            "ai",
+            {
+                "姓名": "Example",
+                "教师主页链接": "http://ai.fudan.edu.cn/zk1/list.htm",
+                "邮箱": "shared@fudan.edu.cn",
+            },
+        )
+
+        self.assertNotEqual(first, second)
+
 
 if __name__ == "__main__":
     unittest.main()

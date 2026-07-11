@@ -50,9 +50,12 @@ def is_generic_url(value: str) -> bool:
     if not url:
         return True
     parsed = urlparse(url)
+    host = parsed.netloc.lower()
     path = parsed.path.lower().rstrip("/")
     if path in {"", "/", "/index.htm", "/index.html", "/system/caslogin.jsp"}:
         return True
+    if host == "ai.fudan.edu.cn" and re.fullmatch(r"/[^/]+/list\.htm", path):
+        return False
     if path.endswith(("/list.htm", "/list.html", "/index.htm")):
         return True
     return False
