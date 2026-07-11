@@ -35,6 +35,28 @@ class TeacherIdentityTests(unittest.TestCase):
         )
         self.assertEqual(first, second)
 
+    def test_official_teacher_page_takes_priority_over_shared_personal_page(self) -> None:
+        first = teacher_id_for_row(
+            "school",
+            "college",
+            {
+                "姓名": "First",
+                "教师主页链接": "https://example.edu/faculty/first",
+                "个人主页": "https://shared.example.org/team",
+            },
+        )
+        second = teacher_id_for_row(
+            "school",
+            "college",
+            {
+                "姓名": "Second",
+                "教师主页链接": "https://example.edu/faculty/second",
+                "个人主页": "https://shared.example.org/team",
+            },
+        )
+
+        self.assertNotEqual(first, second)
+
 
 if __name__ == "__main__":
     unittest.main()

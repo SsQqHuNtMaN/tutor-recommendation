@@ -14,6 +14,7 @@ class TargetConfig:
     directory_url: str
     affiliation_keywords: tuple[str, ...]
     dedup_priority: int = 100
+    cross_target_overlap_group: str = ""
 
     @property
     def output_dir(self) -> Path:
@@ -155,45 +156,38 @@ TARGETS: dict[str, TargetConfig] = {
         affiliation_keywords=("fudan university", "fudan"),
         dedup_priority=40,
     ),
-    "seu_joint": TargetConfig(
-        key="seu_joint",
+    "seu_cse": TargetConfig(
+        key="seu_cse",
         school_slug="seu",
-        college_slug="joint",
+        college_slug="cse",
         school_name="东南大学",
-        college_name="三院联合导师名单",
-        directory_url="https://cse.seu.edu.cn/dsxx/list.htm",
-        affiliation_keywords=("southeast university", "seu"),
-        dedup_priority=80,
-    ),
-    "seu_cs": TargetConfig(
-        key="seu_cs",
-        school_slug="seu",
-        college_slug="cs",
-        school_name="东南大学",
-        college_name="计算机科学系",
+        college_name="计算机科学与工程学院",
         directory_url="https://cse.seu.edu.cn/dsxx/list.htm",
         affiliation_keywords=("southeast university", "seu"),
         dedup_priority=20,
+        cross_target_overlap_group="seu_computing_colleges",
     ),
-    "seu_ce": TargetConfig(
-        key="seu_ce",
+    "seu_software": TargetConfig(
+        key="seu_software",
         school_slug="seu",
-        college_slug="ce",
+        college_slug="software",
         school_name="东南大学",
-        college_name="计算机工程系",
+        college_name="软件学院",
         directory_url="https://cse.seu.edu.cn/dsxx/list.htm",
         affiliation_keywords=("southeast university", "seu"),
-        dedup_priority=20,
+        dedup_priority=30,
+        cross_target_overlap_group="seu_computing_colleges",
     ),
-    "seu_imaging": TargetConfig(
-        key="seu_imaging",
+    "seu_ai": TargetConfig(
+        key="seu_ai",
         school_slug="seu",
-        college_slug="imaging",
+        college_slug="ai",
         school_name="东南大学",
-        college_name="影像科学与技术系",
+        college_name="人工智能学院",
         directory_url="https://cse.seu.edu.cn/dsxx/list.htm",
         affiliation_keywords=("southeast university", "seu"),
-        dedup_priority=20,
+        dedup_priority=40,
+        cross_target_overlap_group="seu_computing_colleges",
     ),
     "tongji_cs": TargetConfig(
         key="tongji_cs",

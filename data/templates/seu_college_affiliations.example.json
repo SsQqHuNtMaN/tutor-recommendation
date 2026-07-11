@@ -1,0 +1,13 @@
+{
+  "_note": "Copy this file to data/private/seu_college_affiliations.json only for manually verified SEU college affiliations. Teacher-level evidence is private and must not be committed.",
+  "entries": [
+    {
+      "name": "Teacher Name",
+      "teacher_url": "https://cs.seu.edu.cn/example/main.htm",
+      "targets": ["seu_cse", "seu_software"],
+      "status": "人工确认",
+      "evidence": "Describe the manually verified college or admissions affiliation.",
+      "sources": ["https://example.edu/official-source"]
+    }
+  ]
+}

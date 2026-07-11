@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
@@ -229,6 +230,7 @@ def deduplicate_targets_rows(
         return rows_by_target
 
     ordered_configs = sorted(configs, key=lambda item: (item.dedup_priority, list(TARGETS).index(item.key)))
+    config_by_key = {config.key: config for config in configs}
     seen_key_to_owner: dict[str, tuple[str, int]] = {}
     seen_name_to_owner: dict[str, tuple[str, int]] = {}
     kept: dict[str, list[dict[str, Any]]] = {config.key: [] for config in configs}
@@ -241,7 +243,22 @@ def deduplicate_targets_rows(
             duplicate_key = next((key for key in keys if key in seen_key_to_owner), "")
             duplicate_owner = seen_key_to_owner.get(duplicate_key) if duplicate_key else None
             duplicate_reason = "identity"
-            if not duplicate_owner and name_key and name_key in seen_name_to_owner:
+            preserved_overlap = False
+            if duplicate_owner:
+                owner_config = config_by_key[duplicate_owner[0]]
+                overlap_group = config.cross_target_overlap_group
+                if overlap_group and overlap_group == owner_config.cross_target_overlap_group:
+                    owner_row = kept[duplicate_owner[0]][duplicate_owner[1]]
+                    duplicate_name = norm_text(row.get("姓名"))
+                    note = (
+                        f"跨目标多学院归属保留：{duplicate_name} @ "
+                        f"{duplicate_owner[0]} / {config.key}"
+                    )
+                    owner_row["去重备注"] = unique_join([owner_row.get("去重备注", ""), note])
+                    row["去重备注"] = unique_join([row.get("去重备注", ""), note])
+                    duplicate_owner = None
+                    preserved_overlap = True
+            if not duplicate_owner and not preserved_overlap and name_key and name_key in seen_name_to_owner:
                 candidate_owner = seen_name_to_owner[name_key]
                 candidate_row = kept[candidate_owner[0]][candidate_owner[1]]
                 duplicate_name = norm_text(row.get("姓名"))
@@ -394,6 +411,23 @@ GENERIC_NON_HOMEPAGE_HOSTS = {
 
 def fetch(session: requests.Session, url: str, encoding: str = "utf-8") -> BeautifulSoup:
     response = session.get(url, timeout=30, headers=HEADERS)
+    if response.status_code == 403 and urlparse(url).netloc.lower().endswith("seu.edu.cn"):
+        completed = subprocess.run(
+            [
+                "curl",
+                "-4",
+                "-L",
+                "--max-time",
+                "30",
+                "-A",
+                HEADERS["User-Agent"],
+                "-sS",
+                url,
+            ],
+            check=True,
+            capture_output=True,
+        )
+        return BeautifulSoup(completed.stdout, "html.parser")
     response.raise_for_status()
     response.encoding = encoding
     return BeautifulSoup(response.text, "html.parser")
@@ -1814,11 +1848,20 @@ def fetch_fudan_ai_directory(session: requests.Session, config: TargetConfig) ->
 
 
 SEU_DEPARTMENT_PAGE = "https://cse.seu.edu.cn/54820/list.htm"
-SEU_TARGET_DEPARTMENTS = {
-    "seu_cs": "计算机科学系",
-    "seu_ce": "计算机工程系",
-    "seu_imaging": "影像科学与技术系",
+SEU_ORGANIZATION_PAGE = "https://cse.seu.edu.cn/49430/list.htm"
+SEU_ADMISSIONS_NOTICE = "https://cse.seu.edu.cn/2026/0710/c49342a576431/page.htm"
+SEU_AFFILIATION_OVERRIDE_PATH = Path("data/private/seu_college_affiliations.json")
+SEU_DEPARTMENTS = {
+    "计算机科学系",
+    "计算机工程系",
+    "影像科学与技术系",
 }
+SEU_COLLEGE_NAMES = {
+    "seu_cse": "计算机科学与工程学院",
+    "seu_software": "软件学院",
+    "seu_ai": "人工智能学院",
+}
+SEU_DETAIL_CACHE: list[dict[str, Any]] | None = None
 
 
 def clean_seu_name(text: str) -> str:
@@ -1831,19 +1874,129 @@ def fetch_seu_department_map(session: requests.Session) -> dict[str, str]:
     node = soup.select_one(".wp_articlecontent") or soup.select_one(".listcon")
     if node is None:
         return {}
-    departments = {"计算机科学系", "计算机工程系", "影像科学与技术系"}
     current = ""
     result: dict[str, str] = {}
     for element in node.descendants:
         if isinstance(element, str):
             text = norm_text(element)
-            if text in departments:
+            if text in SEU_DEPARTMENTS:
                 current = text
         if getattr(element, "name", None) == "a" and element.get("href") and current:
             name = clean_seu_name(element.get_text(" ", strip=True))
             if name:
                 result.setdefault(name, current)
     return result
+
+
+def load_seu_affiliation_overrides() -> list[dict[str, Any]]:
+    if not SEU_AFFILIATION_OVERRIDE_PATH.exists():
+        return []
+    try:
+        payload = json.loads(SEU_AFFILIATION_OVERRIDE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Invalid SEU affiliation override file: {SEU_AFFILIATION_OVERRIDE_PATH}: {exc}") from exc
+    entries = payload.get("entries") if isinstance(payload, dict) else None
+    if not isinstance(entries, list):
+        raise SystemExit(f"SEU affiliation override file must contain an entries list: {SEU_AFFILIATION_OVERRIDE_PATH}")
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("targets"), list):
+            raise SystemExit(f"Invalid SEU affiliation override entry: {entry!r}")
+        invalid_targets = sorted(set(entry["targets"]) - set(SEU_COLLEGE_NAMES))
+        if invalid_targets:
+            raise SystemExit(f"Unknown SEU affiliation targets in override: {invalid_targets}")
+        if not norm_text(entry.get("name")) and not norm_text(entry.get("teacher_url")):
+            raise SystemExit(f"SEU affiliation override needs name or teacher_url: {entry!r}")
+    return entries
+
+
+def seu_evidence_snippet(text: str, needle: str, radius: int = 100) -> str:
+    index = text.find(needle)
+    if index < 0:
+        return ""
+    start = max(0, index - radius)
+    end = min(len(text), index + len(needle) + radius)
+    return norm_text(text[start:end])
+
+
+def seu_profile_college_evidence(profile_text: str, target_key: str) -> str:
+    college_name = SEU_COLLEGE_NAMES[target_key]
+    recruiting_patterns = [
+        rf"招收.{{0,100}}{re.escape(college_name)}",
+        rf"{re.escape(college_name)}.{{0,100}}(?:招收|招生|报考)",
+    ]
+    for pattern in recruiting_patterns:
+        match = re.search(pattern, profile_text)
+        if match:
+            return seu_evidence_snippet(profile_text, college_name)
+
+    role_pattern = rf"{re.escape(college_name)}(?:(?!(?:取得|毕业|学位|学院)).){{0,40}}(?:教授|副教授|讲师|导师|院长|任职|就职|工作至今)"
+    if re.search(role_pattern, profile_text):
+        return seu_evidence_snippet(profile_text, college_name)
+
+    college_list_pattern = re.compile(
+        r"东南大学(?:计算机科学与工程学院|计算机学院|软件学院|人工智能学院|[、，,/与和\s]){2,100}"
+        r"(?:教授|副教授|讲师|导师|院长|任职|就职|工作至今)"
+    )
+    for match in college_list_pattern.finditer(profile_text):
+        if college_name in match.group(0):
+            return seu_evidence_snippet(profile_text, college_name)
+
+    if target_key in {"seu_software", "seu_ai"} and "计算机软件与人工智能学院" in profile_text:
+        return seu_evidence_snippet(profile_text, "计算机软件与人工智能学院")
+    return ""
+
+
+def seu_affiliations_for_detail(detail: dict[str, Any], overrides: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+    name = norm_text(detail.get("姓名"))
+    teacher_url = normalize_identity_url(detail.get("教师主页链接"))
+    department = norm_text(detail.get("官方系别"))
+    profile_text = norm_text(detail.get("_seu_profile_text"))
+    affiliations: dict[str, dict[str, str]] = {}
+
+    if department in SEU_DEPARTMENTS:
+        affiliations["seu_cse"] = {
+            "status": "官方确认",
+            "method": "官方组织机构内设系别",
+            "evidence": f"官方组织机构将“{department}”列为计算机科学与工程学院内设机构；导师主页所在院系为“{department}”。",
+            "source": unique_join([SEU_ORGANIZATION_PAGE, detail.get("教师主页链接", "")]),
+        }
+
+    for target_key in SEU_COLLEGE_NAMES:
+        snippet = seu_profile_college_evidence(profile_text, target_key)
+        if snippet:
+            affiliations[target_key] = {
+                "status": "官方确认",
+                "method": "导师主页明确表述",
+                "evidence": snippet,
+                "source": norm_text(detail.get("教师主页链接")),
+            }
+
+    for entry in overrides:
+        entry_name = norm_text(entry.get("name"))
+        entry_url = normalize_identity_url(entry.get("teacher_url"))
+        if entry_url and entry_url != teacher_url:
+            continue
+        if entry_name and entry_name != name:
+            continue
+        for target_key in entry["targets"]:
+            sources = entry.get("sources", [])
+            if isinstance(sources, str):
+                sources = [sources]
+            affiliations[target_key] = {
+                "status": norm_text(entry.get("status")) or "人工确认",
+                "method": "本地人工复核",
+                "evidence": norm_text(entry.get("evidence")) or "本地人工确认学院归属",
+                "source": unique_join(sources),
+            }
+
+    if not affiliations:
+        affiliations["seu_cse"] = {
+            "status": "待复核",
+            "method": "联合导师名录待复核",
+            "evidence": "教师出现在三学院共用的官方研究生导师名录中，但主页未提供可核验的学院归属。",
+            "source": norm_text(detail.get("教师主页链接")) or TARGETS["seu_cse"].directory_url,
+        }
+    return affiliations
 
 
 def parse_seu_mentor_links(session: requests.Session, config: TargetConfig) -> list[dict[str, Any]]:
@@ -1895,6 +2048,7 @@ def parse_seu_profile_detail(session: requests.Session, row: dict[str, Any], dep
         detail["个人主页"] = ""
         detail["研究方向"] = ""
         detail["个人简介摘要"] = ""
+        detail["_seu_profile_text"] = ""
         return detail
     mentor_types = row.get("导师类型", [])
     if not isinstance(mentor_types, list):
@@ -1908,6 +2062,7 @@ def parse_seu_profile_detail(session: requests.Session, row: dict[str, Any], dep
         detail["抓取状态"] = "无独立主页"
         detail["个人简介摘要"] = ""
         detail["研究方向"] = ""
+        detail["_seu_profile_text"] = ""
         return detail
 
     try:
@@ -1916,6 +2071,7 @@ def parse_seu_profile_detail(session: requests.Session, row: dict[str, Any], dep
         detail["抓取状态"] = f"主页抓取失败：{exc}"
         detail["个人简介摘要"] = ""
         detail["研究方向"] = ""
+        detail["_seu_profile_text"] = ""
         return detail
 
     content_text = get_article_text(soup)
@@ -1928,6 +2084,7 @@ def parse_seu_profile_detail(session: requests.Session, row: dict[str, Any], dep
             profile_text = profile_text[name_index:]
             break
     profile_text = strip_at_markers(profile_text, ["相关链接", "联系方式", "学院微信公众号", "Copyright"])
+    detail["_seu_profile_text"] = profile_text
     department = extract_labeled_value(profile_text, "所在院系", ["研究方向", "电话", "邮箱", "职务", "个人简介"])
     if not department:
         department = department_map.get(norm_text(row.get("姓名")), "")
@@ -1960,11 +2117,14 @@ def parse_seu_profile_detail(session: requests.Session, row: dict[str, Any], dep
     return detail
 
 
-def fetch_seu_directory(session: requests.Session, config: TargetConfig) -> list[dict[str, Any]]:
+def fetch_seu_details(session: requests.Session, config: TargetConfig) -> list[dict[str, Any]]:
+    global SEU_DETAIL_CACHE
+    if SEU_DETAIL_CACHE is not None:
+        return [dict(row) for row in SEU_DETAIL_CACHE]
+
     department_map = fetch_seu_department_map(session)
     mentors = parse_seu_mentor_links(session, config)
-    target_department = SEU_TARGET_DEPARTMENTS.get(config.key)
-    rows: list[dict[str, Any]] = []
+    details: list[dict[str, Any]] = []
     for row in mentors:
         name = norm_text(row.get("姓名"))
         official_department = department_map.get(name, "")
@@ -1989,13 +2149,29 @@ def fetch_seu_directory(session: requests.Session, config: TargetConfig) -> list
             "是否兼职": row.get("是否兼职", ""),
         }
         detail = parse_seu_profile_detail(session, base_row, department_map)
-        if config.key == "seu_joint" and norm_text(detail.get("官方系别")) in set(SEU_TARGET_DEPARTMENTS.values()):
+        details.append(detail)
+        time.sleep(0.03)
+    SEU_DETAIL_CACHE = [dict(row) for row in details]
+    return details
+
+
+def fetch_seu_directory(session: requests.Session, config: TargetConfig) -> list[dict[str, Any]]:
+    overrides = load_seu_affiliation_overrides()
+    rows: list[dict[str, Any]] = []
+    for cached_detail in fetch_seu_details(session, config):
+        detail = dict(cached_detail)
+        affiliations = seu_affiliations_for_detail(detail, overrides)
+        affiliation = affiliations.get(config.key)
+        detail.pop("_seu_profile_text", None)
+        if not affiliation:
             continue
-        if target_department and norm_text(detail.get("官方系别")) != target_department:
-            continue
+        detail["学院归属"] = config.college_name
+        detail["学院归属状态"] = affiliation["status"]
+        detail["学院归属方式"] = affiliation["method"]
+        detail["学院归属证据"] = affiliation["evidence"]
+        detail["学院归属来源"] = affiliation["source"]
         detail["名录序号"] = len(rows) + 1
         rows.append(detail)
-        time.sleep(0.03)
     return rows
 
 
@@ -3348,6 +3524,11 @@ def build_workbook(config: TargetConfig, rows: list[dict[str, Any]]) -> None:
         "导师信息库团队",
         "团队PDF证据",
         "去重备注",
+        "学院归属",
+        "学院归属状态",
+        "学院归属方式",
+        "学院归属证据",
+        "学院归属来源",
         "名录研究所",
         "主页研究所",
         "官方系别",
@@ -3389,6 +3570,17 @@ def build_workbook(config: TargetConfig, rows: list[dict[str, Any]]) -> None:
     source_rows.extend(context_source_rows(run_context))
     if config.key == "zju_cs":
         source_rows.append({"项目": "导师团队信息库PDF来源", "内容": ZJU_CS_TEAM_INFO_URL})
+    if config.key in SEU_COLLEGE_NAMES:
+        source_rows.extend(
+            [
+                {"项目": "学院组织机构来源", "内容": SEU_ORGANIZATION_PAGE},
+                {"项目": "学院招生材料来源", "内容": SEU_ADMISSIONS_NOTICE},
+                {
+                    "项目": "学院归属说明",
+                    "内容": "学院归属只采用官方组织机构、导师主页明确表述或本地人工复核；内部系别保留为辅助字段。",
+                },
+            ]
+        )
     source_df = pd.DataFrame(source_rows)
     source_df = source_df.map(clean_excel_cell)
 
@@ -3435,7 +3627,7 @@ def fetch_target_rows(config: TargetConfig) -> list[dict[str, Any]]:
         rows = fetch_fudan_ciram_directory(session, config)
     elif config.key == "fudan_ai":
         rows = fetch_fudan_ai_directory(session, config)
-    elif config.key in {"seu_joint", "seu_cs", "seu_ce", "seu_imaging"}:
+    elif config.key in {"seu_cse", "seu_software", "seu_ai"}:
         rows = fetch_seu_directory(session, config)
     elif config.key == "tongji_cs":
         rows = fetch_tongji_cs_directory(session, config)

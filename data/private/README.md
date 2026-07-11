@@ -20,3 +20,4 @@ Common local-only files:
 - `student_profile.json`
 - `dblp_overrides.json`
 - `web_search_curated.json`
+- `seu_college_affiliations.json`

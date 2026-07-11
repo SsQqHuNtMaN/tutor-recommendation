@@ -68,14 +68,14 @@ def _digest(value: str) -> str:
 
 def identity_basis(school_slug: str, college_slug: str, row: Any) -> tuple[str, str]:
     getter = row.get
-    urls: list[str] = []
     for column in ["教师主页链接", "个人主页"]:
+        urls: list[str] = []
         for raw in re.split(r"[;；,，\s]+", norm_text(getter(column, ""))):
             url = normalize_url(raw)
             if url and not is_generic_url(url):
                 urls.append(url)
-    if urls:
-        return "url", f"{school_slug}|{sorted(set(urls))[0]}"
+        if urls:
+            return "url", f"{school_slug}|{sorted(set(urls))[0]}"
 
     emails = extract_emails(getter("邮箱", ""))
     if emails:
