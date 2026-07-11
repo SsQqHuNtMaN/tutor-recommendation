@@ -27,6 +27,7 @@ outputs/<school_slug>/<college_slug>/
 - 智能科学与技术学院：`is`
 - 集成电路学院：`ic`
 - 智能机器人与先进制造创新学院：`ciram`
+- 三院联合导师名单：`joint`
 - 计算机工程系：`ce`
 - 影像科学与技术系：`imaging`
 - 电子与信息工程学院：`see`
