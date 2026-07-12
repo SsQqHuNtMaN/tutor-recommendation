@@ -4,82 +4,75 @@
   <img src="docs/assets/tutor-recommendation-icon.png" alt="Tutor Recommendation" width="760">
 </p>
 
-> 🎓 一个面向导师套磁/研究生申请的本地工作区：把简历、目标学院教师页和公开网页证据整理成可复核的推荐结果，再用网页看板跟进联系状态。
+## 项目简介
 
-Tutor Recommendation 不是一个“点一下就替你决定导师”的黑箱工具。更推荐的使用方式是：你把项目下载到本地，放入自己的简历和目标学院链接，然后让 Coding Agent 根据仓库里的 README、AGENTS 和 docs 流程完成信息搜集、脚本适配、证据整理与结果生成。最后你在本地网页看板里筛选、统计和维护套磁进度。
+Tutor Recommendation 是一个本地运行的导师推荐与套磁管理工作区。它把学生画像、学院教师目录和公开学术证据整理为可复核的推荐工作簿，并通过网页看板管理套磁日期、回复进展和备注。
 
-## ✨ 适合做什么
+项目强调“证据辅助、人工决策”：推荐等级来自统一规则，教师主页和官方材料提供核心方向锚点，DBLP、arXiv、已知网页及可选 WebSearch 用于补充证据，不会仅凭论文关键词自动判定导师适合。
 
-- 🔎 整理目标学院教师主页、研究方向、邮箱和个人主页
-- 📎 读取部分目标页面上的 PDF 导师库或团队介绍附件
-- 📚 补充 DBLP、arXiv、个人主页和网页证据
-- 🧭 根据你的学生画像和关键词生成推荐优先级
-- 🧹 批量处理同校重叠学院名单时，按个人主页/教师页身份线索去重；有明确多学院归属证据的导师可保留在多个学院
-- 📝 保留推荐理由和证据来源，方便人工复核
-- ✅ 用本地网页看板维护套磁状态、时间、回复和备注，并用桌面月历/移动议程安排联系节奏
-- 🔒 简历、画像、生成结果和联系状态默认只留在本机
+- 私有画像、生成结果和联系状态默认只保存在本机。
+- 推荐理由、证据来源、身份置信度和评分警告均可审计。
+- 支持多学院教师去重以及有证据的跨学院归属。
+- Viewer 同时提供套磁日历、推荐列表和教师详情。
 
-## 🧩 使用流程
+## 项目介绍
 
-![Tutor Recommendation 使用流程](docs/assets/tutor-recommendation-workflow.png)
+```mermaid
+flowchart LR
+    A[私有学生画像] --> B[教师目录与主页采集]
+    B --> C[DBLP / arXiv / 网页证据补全]
+    C --> D[统一评分与推荐工作簿]
+    D --> E[本地 Viewer 筛选与套磁跟进]
+```
 
-## 🚀 快速开始
+| 模块 | 作用 |
+| --- | --- |
+| 学生画像 | 配置关注方向、关键词和权重，正式运行缺失时直接报错 |
+| 三阶段研究流程 | 采集官方信息，补充 DBLP，再完成 arXiv 与网页证据 |
+| 排名与审计 | 输出 `强烈建议`、`可以考虑`、`暂不优先` 及可读理由 |
+| 本地 Viewer | 查看日历和推荐列表，编辑套磁状态、日期、回复与备注 |
 
-### 1. 下载项目
+生成文件位于 `outputs/<school_slug>/<college_slug>/`，通常包括综合推荐工作簿、阶段 checkpoint、证据 cache 和运行清单。人工联系状态统一保存在 `outputs/contact_status.json`；Excel 是查看和交付产物，JSON 是本地可编辑状态源。
+
+Viewer 用连续四周条带展示套磁情况：星期作为固定列头，每行按本周、上周或下周等相对名称标记，每次前后移动一周。每天只显示不同回复状态的颜色和数量，点击日期后再查看当天教师；已安排具体面试时间的记录使用菱形标记。日历拥有独立的学校和学院筛选，并可单独收起；教师列表按推荐等级和匹配分排序，详情中可维护精确到分钟的面试时间。页面固定为一个视口，日历、表格和详情在各自区域内滚动。
+
+隐私文件不会进入版本控制，包括 `data/private/`、`docs/private/`、`outputs/`、简历、工作簿、cache 和联系状态。不要手工把真实申请材料或教师级联系决策提交到公开仓库。
+
+## 快速开始
+
+### 1. 下载并安装
 
 ```powershell
 git clone https://github.com/SsQqHuNtMaN/tutor-recommendation.git
 cd tutor-recommendation
-```
-
-### 2. 安装环境
-
-```powershell
 python -m pip install -r requirements.txt
 ```
 
-`requirements.txt` 包含 `PyMuPDF`，用于需要从 PDF 简历、导师库或团队介绍附件中抽取文本的目标。
+### 2. 准备学生画像
 
-### 3. 放入自己的材料
-
-把简历、申请材料等私人文件放到：
-
-```text
-data/private/
-```
-
-复制一份学生画像模板：
+PowerShell：
 
 ```powershell
 Copy-Item data/templates/student_profile.example.json data/private/student_profile.json
 ```
 
-你可以自己填写，也可以让 Coding Agent 根据你的简历帮你整理。这个文件会决定匹配时更看重哪些研究方向和关键词。
+Bash：
 
-正式运行缺少或无法解析私有画像时会直接失败，不会静默回退到公开模板。临时演示必须显式使用 `--demo-profile`；使用其他画像文件可传 `--profile <path>`。
-
-### 4. 交给 Coding Agent 执行
-
-在 Codex、Claude Code 或其他 Coding Agent 中，可以直接给它类似这样的任务：
-
-```text
-请阅读 README.md、AGENTS.md 和 docs/runbook.md。
-我的简历和画像放在 data/private/。
-目标学院教师列表链接是：<粘贴目标学院教师页 URL>。
-请按照项目流程完成教师信息搜集、证据补全、推荐匹配，并生成本地看板可读取的结果。
+```bash
+cp data/templates/student_profile.example.json data/private/student_profile.json
 ```
 
-Agent 通常会做这些事：
+编辑 `data/private/student_profile.json`，填写自己的研究方向、关键词和权重。简历及申请材料也应放在 `data/private/`。正式运行不会自动使用公开示例画像；临时演示需要显式传入 `--demo-profile`。
 
-- 读取你的学生画像和目标学院页面
-- 必要时补充或调整目标采集逻辑
-- 运行教师目录、DBLP、arXiv、网页证据等流程
-- 生成本地结果文件到 `outputs/`
-- 帮你检查强推荐、低置信证据和需要人工复核的行
+### 3. 选择目标并生成结果
 
-你也可以参考 [运行手册](docs/runbook.md) 手动执行这些步骤。
+先查看已支持的目标键：
 
-三阶段命令为：
+```powershell
+python build_teacher_match.py --help
+```
+
+然后依次运行三个阶段：
 
 ```powershell
 python build_teacher_match.py <target>
@@ -87,74 +80,35 @@ python update_teacher_match_with_dblp.py <target>
 python complete_teacher_research.py <target>
 ```
 
-所有阶段共用同一套排名规则。候选进入优先名单前，官方名录、教师主页或官方 PDF 必须出现画像中的显式核心方向；DBLP、arXiv、已知网页和自动 WebSearch 只能补强或发现证据，不能在没有官方锚点时单独抬高等级。
+同一学校存在重叠学院时，应在一次首阶段命令中同时传入这些目标键，以便执行跨学院身份去重。需要新增目标学院或调整页面解析时，可让 Coding Agent 先阅读 `AGENTS.md` 和 `docs/runbook.md` 后完成适配。
 
-## 🖥️ 打开网页看板
+### 4. 打开本地看板
 
-生成结果后，启动本地看板：
+Windows：
 
 ```powershell
 .\start_viewer.bat
 ```
 
-然后访问：
+Linux 或 macOS：
 
-```text
-http://127.0.0.1:8765/
+```bash
+./start_viewer.sh
 ```
 
-看板会读取 `outputs/` 中的结果，支持筛选推荐等级、隐藏所有已标记套磁情况的教师、维护套磁状态、记录时间、回复和回复情况备注。“查看已套磁”只显示 `套磁情况=已套磁` 的教师；“隐藏已标记”则会隐藏任意非空套磁状态，两者语义不同。套磁日历在桌面显示月历，在窄屏显示按日期排列的议程，复用学校、学院等筛选，并提供缺日期列表、同日同学院和短期同校密集发送的可关闭提醒。日历事件使用颜色和文字表达 `回复情况`；存在多个回复进展时保留完整回复链，并以最高进展作为主色。点击日历条目可进入现有教师详情，修改日期或回复情况后会立即刷新并持久化。主表把推荐等级、匹配分、核心匹配词、教师主页提取的官方方向和锚点/风险放在同一视图；教师详情先展示是否适合进入套磁名单，再按官方方向、论文信号和网页补充分组呈现证据。首次把教师标为“已套磁”时，若套磁时间为空，看板会按本机日期自动填入当天，已有日期不会被覆盖。看板只展示工作簿中的统一排名结论，不会在浏览器中重新计算等级。
+浏览器访问 `http://127.0.0.1:8765/`。如果页面提示 `/api/session` 为404，说明旧 Viewer 仍占用端口；关闭旧进程后重新启动，不要删除 `outputs/contact_status.json`。
 
-服务只允许监听本机回环地址，写操作需要当前进程生成的会话令牌并校验同源请求。不要把它作为无认证的局域网服务暴露。
-
-如果需要把网页里维护的状态同步回 Excel：
+如需把看板中的联系状态同步回工作簿：
 
 ```powershell
 python sync_contact_status_to_workbooks.py
 ```
 
-## 📦 你会得到什么
-
-每个目标学院会在本地生成一组结果文件，通常包括：
-
-- 初步教师名录
-- DBLP 增强结果
-- 综合推荐工作簿
-- arXiv / 网页 / 可选 WebSearch 证据明细
-- 本地网页看板读取的套磁状态
-
-最终工作簿常见 sheet：
-
-- `优先套磁名单`
-- `全量教师名录`
-- `DBLP近三年明细`
-- `arXiv近三年明细`
-- `网页证据明细`
-- `匹配依据`
-
-每次新阶段运行还会在学院输出目录写入 `run_manifest.json`，记录画像哈希、评分规则/schema 版本、代码版本、动态年份窗口和输入哈希。可用以下命令检查旧 checkpoint 是否还能用于离线汇总，并对现有结果做不改写 Excel 的影子质量审计：
+### 5. 检查结果
 
 ```powershell
 python checkpoint_doctor.py <target>
 python result_quality_audit.py --fail-on-violations
 ```
 
-## 🔐 隐私说明
-
-默认不会入库的内容包括：
-
-- `data/private/` 下的简历、申请材料和学生画像
-- `outputs/` 下的生成结果
-- `docs/private/` 下的本地交接记录
-- PDF、DOCX、XLSX、cache、checkpoint 和联系状态文件
-
-公开仓库只保留通用模板、脚本和方法文档。不要把自己的真实简历、目标结果、教师级复核结论或联系状态提交到 GitHub。
-
-## 📖 更多文档
-
-- [运行手册](docs/runbook.md)
-- [工作流方法论](docs/teacher-matching-workflow.md)
-- [输出目录规则](docs/output-organization.md)
-- [公开交接模板](docs/handoff.md)
-- [Viewer 日历与教师列表整合布局 TODO](docs/viewer-integrated-layout-todo.md)
-- [Hermes Agent 等方案适配调查](docs/hermes-agent-evaluation-2026-07-11.md)
+完整命令、故障排查和方法说明见 [运行手册](docs/runbook.md)、[工作流方法论](docs/teacher-matching-workflow.md) 和 [输出目录规则](docs/output-organization.md)。

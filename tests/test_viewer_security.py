@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from tutor_recommendation.viewer_server import (
+    VIEWER_API_VERSION,
     is_loopback_host,
     request_host_is_allowed,
     request_origin_is_allowed,
@@ -10,6 +12,12 @@ from tutor_recommendation.viewer_server import (
 
 
 class ViewerSecurityTests(unittest.TestCase):
+    def test_launchers_require_current_api_version(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        for launcher in ("start_viewer.bat", "start_viewer.sh"):
+            text = (project_root / launcher).read_text(encoding="utf-8")
+            self.assertIn(f'health.get("apiVersion") == {VIEWER_API_VERSION}', text.replace("'", '"'))
+
     def test_only_loopback_hosts_are_allowed(self) -> None:
         self.assertTrue(is_loopback_host("127.0.0.1"))
         self.assertTrue(is_loopback_host("localhost"))

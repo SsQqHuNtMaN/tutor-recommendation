@@ -7,41 +7,82 @@
     <link rel="stylesheet" href="assets/app.css" />
   </head>
   <body>
-    <main class="app-shell">
+    <main id="appShell" class="app-shell">
       <header class="topbar">
         <div class="title-block">
           <h1>教师套磁看板</h1>
           <div id="summary" class="summary">未加载数据</div>
         </div>
-        <div class="actions">
-          <button id="pickOutputs" type="button" title="选择 outputs 目录">打开</button>
-          <label class="file-button" title="选择 outputs 目录或多个 xlsx">
-            导入
-            <input id="fileInput" type="file" multiple webkitdirectory accept=".xlsx,.json" />
-          </label>
-          <label class="file-button" title="导入 contact_status.json">
-            状态
-            <input id="statusInput" type="file" accept=".json" />
-          </label>
-          <button id="saveStatus" type="button" title="保存 contact_status.json">保存</button>
-          <button id="syncExcel" type="button" title="同步状态到当前 Excel 工作簿" style="display: none">同步Excel</button>
-          <button id="downloadStatus" type="button" title="下载 contact_status.json">下载</button>
-          <button id="exportXlsx" type="button" title="导出当前筛选">导出</button>
-        </div>
       </header>
 
-      <nav id="viewTabs" class="view-tabs" aria-label="视图">
-        <button type="button" data-view="all" class="active" aria-pressed="true">全部教师</button>
-        <button type="button" data-view="calendar" aria-pressed="false">套磁日历</button>
-      </nav>
+      <section id="calendarPane" class="calendar-pane" aria-label="套磁日历">
+        <div id="calendarLayout" class="calendar-layout">
+          <div class="calendar-toolbar">
+            <div class="calendar-heading">
+              <h2 id="calendarRangeLabel" class="calendar-range-label"></h2>
+              <div id="calendarRangeSummary" class="calendar-range-summary"></div>
+            </div>
+            <div class="calendar-toolbar-controls">
+              <div class="calendar-navigation" aria-label="四周范围导航">
+                <button id="calendarPrev" type="button" title="向前一周">上一周</button>
+                <button id="calendarToday" type="button">本周</button>
+                <button id="calendarNext" type="button" title="向后一周">下一周</button>
+              </div>
+              <div class="calendar-filters" aria-label="日历筛选">
+                <select id="calendarSchoolFilter" aria-label="日历学校"></select>
+                <select id="calendarCollegeFilter" aria-label="日历学院"></select>
+              </div>
+            </div>
+          </div>
+          <div id="calendarLegend" class="calendar-legend" aria-label="四周回复情况数量"></div>
+          <div class="calendar-table-scroll">
+            <div class="calendar-weekdays" aria-hidden="true">
+              <span></span>
+              <span>星期一</span>
+              <span>星期二</span>
+              <span>星期三</span>
+              <span>星期四</span>
+              <span>星期五</span>
+              <span>星期六</span>
+              <span>星期日</span>
+            </div>
+            <div id="calendarGrid" class="calendar-strip" aria-label="四周套磁情况"></div>
+          </div>
+          <section class="calendar-selected-day" aria-live="polite">
+            <div class="calendar-selected-heading">
+              <h3 id="calendarSelectedDate">选择一天查看教师</h3>
+              <span id="calendarSelectedCount" class="count-badge">0</span>
+            </div>
+            <div id="calendarSelectedTeachers" class="calendar-selected-teachers"></div>
+          </section>
+          <details id="missingDateSection" class="missing-date-section">
+            <summary>
+              待补套磁日期
+              <span id="missingDateCount" class="count-badge">0</span>
+            </summary>
+            <div id="missingDateList" class="missing-date-list"></div>
+          </details>
+        </div>
+        <div class="calendar-collapsed-bar" aria-hidden="true">
+          <strong>套磁日历</strong>
+          <span id="calendarCollapsedSummary"></span>
+        </div>
+        <button
+          id="calendarToggle"
+          class="calendar-toggle"
+          type="button"
+          aria-controls="calendarLayout"
+          aria-expanded="true"
+          title="收起套磁日历"
+        >收起日历 ⌃</button>
+      </section>
 
-      <section class="filters" aria-label="筛选">
+      <section class="filters" aria-label="教师列表筛选">
         <input id="searchInput" type="search" placeholder="姓名 / 学校 / 方向 / 关键词" />
         <select id="schoolFilter"></select>
         <select id="collegeFilter"></select>
         <select id="levelFilter"></select>
         <select id="contactFilter"></select>
-        <input id="minScore" type="number" min="0" step="1" placeholder="最低分" />
         <label class="check-line">
           <input id="contactedOnly" type="checkbox" />
           <span>查看已套磁</span>
@@ -56,7 +97,7 @@
         </label>
       </section>
 
-      <section class="content">
+      <section id="workbench" class="workbench">
         <div class="table-pane">
           <table>
             <thead>
@@ -75,45 +116,22 @@
             <tbody id="teacherRows"></tbody>
           </table>
         </div>
-        <div id="calendarPane" class="calendar-pane" hidden>
-          <div class="calendar-toolbar">
-            <div class="calendar-navigation" aria-label="月份导航">
-              <button id="calendarPrev" type="button" title="上个月">上月</button>
-              <button id="calendarToday" type="button">今天</button>
-              <button id="calendarNext" type="button" title="下个月">下月</button>
-            </div>
-            <div>
-              <h2 id="calendarMonthLabel" class="calendar-month-label"></h2>
-              <div id="calendarMonthSummary" class="calendar-month-summary"></div>
-            </div>
-          </div>
-          <div class="calendar-legend" aria-label="回复情况图例">
-            <span class="calendar-legend-item response-sent"><i></i>已发</span>
-            <span class="calendar-legend-item response-official"><i></i>官回</span>
-            <span class="calendar-legend-item response-wechat"><i></i>添加微信</span>
-            <span class="calendar-legend-item response-interview"><i></i>约面试</span>
-            <span class="calendar-legend-item response-assessment"><i></i>考核</span>
-            <span class="calendar-legend-item response-full"><i></i>已满</span>
-            <span class="calendar-legend-item response-unset"><i></i>未记录</span>
-          </div>
-          <div id="calendarWarnings" class="calendar-warnings" aria-live="polite"></div>
-          <div id="calendarGrid" class="calendar-grid" aria-label="套磁月历"></div>
-          <div id="calendarAgenda" class="calendar-agenda" aria-label="套磁议程"></div>
-          <section class="missing-date-section">
-            <div class="missing-date-heading">
-              <h2>待补套磁日期</h2>
-              <span id="missingDateCount" class="count-badge">0</span>
-            </div>
-            <div id="missingDateList" class="missing-date-list"></div>
-          </section>
+        <div id="detailShell" class="detail-shell">
+          <button
+            id="detailToggle"
+            class="detail-toggle"
+            type="button"
+            aria-controls="detailPane"
+            aria-expanded="true"
+            title="收起教师详情"
+          >&gt;</button>
+          <aside id="detailPane" class="detail-pane">
+            <div class="empty-detail">选择一位教师</div>
+          </aside>
         </div>
-        <aside id="detailPane" class="detail-pane">
-          <div class="empty-detail">选择一位教师</div>
-        </aside>
       </section>
     </main>
 
-    <script src="vendor/xlsx.full.min.js"></script>
     <script src="assets/app.js"></script>
   </body>
 </html>

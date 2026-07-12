@@ -1,55 +1,29 @@
 const STATUS_COLUMN = "套磁情况";
 const CONTACT_DATE_COLUMN = "套磁时间";
 const CONTACT_RESPONSE_COLUMN = "回复情况";
+const INTERVIEW_TIME_COLUMN = "约面试时间";
 const CONTACT_NOTE_COLUMN = "回复情况备注";
 const LEGACY_CONTACT_NOTE_COLUMNS = ["套磁备注"];
 const VALID_STATUSES = ["已套磁", "先不考虑", "不可能", "不匹配"];
 const LEGACY_STATUS_ALIASES = { 不考虑: "先不考虑" };
 const DEFAULT_RESPONSES = ["已发", "官回", "添加微信", "约面试", "考核", "已满"];
-const FINAL_FILE_PATTERN = /_teacher_match_full_research\.xlsx$/i;
-
-const SCHOOL_NAMES = {
-  sjtu: "上海交通大学",
-  nju: "南京大学",
-  ruc: "中国人民大学",
-  fudan: "复旦大学",
-  seu: "东南大学",
-  tongji: "同济大学",
-  ustc: "中国科学技术大学",
-};
-
-const COLLEGE_NAMES = {
-  "sjtu/cs": "计算机学院",
-  "sjtu/ai": "人工智能学院",
-  "nju/cs": "计算机学院",
-  "nju/ai": "人工智能学院",
-  "nju/ra": "机器人与自动化学院",
-  "nju/is": "智能科学与技术学院",
-  "nju/ic": "集成电路学院",
-  "ruc/gsai": "高瓴人工智能学院",
-  "ruc/ssai": "苏州人工智能学院",
-  "fudan/ciram": "智能机器人与先进制造创新学院",
-  "fudan/ai": "计算与智能创新学院",
-  "seu/cse": "计算机科学与工程学院",
-  "seu/software": "软件学院",
-  "seu/ai": "人工智能学院",
-  "tongji/cs": "计算机科学与技术学院",
-  "tongji/see": "电子与信息工程学院",
-  "ustc/ai_ds": "人工智能与数据科学学院",
-};
+const SIDEBAR_STORAGE_KEY = "tutor-viewer-sidebar-collapsed";
+const CALENDAR_STORAGE_KEY = "tutor-viewer-calendar-collapsed";
+const TABLE_BATCH_SIZE = 120;
+const SEARCH_DEBOUNCE_MS = 160;
 
 const state = {
-  apiMode: false,
   csrfToken: "",
-  outputsHandle: null,
-  statusHandle: null,
-  statusStore: { version: 3, updated_at: "", statuses: {} },
+  statusStore: { version: 4, updated_at: "", statuses: {} },
   records: [],
   filtered: [],
+  calendarFiltered: [],
+  tableRenderLimit: TABLE_BATCH_SIZE,
   selectedKey: "",
-  viewMode: "all",
-  calendarMonth: "",
-  dismissedCalendarWarnings: new Set(),
+  sidebarCollapsed: false,
+  calendarCollapsed: false,
+  calendarRangeStart: "",
+  selectedCalendarDate: "",
   dirty: false,
   pendingSaves: 0,
   saveFailures: 0,
@@ -59,39 +33,40 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 const els = {
-  pickOutputs: $("pickOutputs"),
-  fileInput: $("fileInput"),
-  statusInput: $("statusInput"),
-  saveStatus: $("saveStatus"),
-  syncExcel: $("syncExcel"),
-  downloadStatus: $("downloadStatus"),
-  exportXlsx: $("exportXlsx"),
   summary: $("summary"),
-  viewTabs: $("viewTabs"),
+  appShell: $("appShell"),
+  calendarSchoolFilter: $("calendarSchoolFilter"),
+  calendarCollegeFilter: $("calendarCollegeFilter"),
   searchInput: $("searchInput"),
   schoolFilter: $("schoolFilter"),
   collegeFilter: $("collegeFilter"),
   levelFilter: $("levelFilter"),
   contactFilter: $("contactFilter"),
-  minScore: $("minScore"),
   contactedOnly: $("contactedOnly"),
   hideContacted: $("hideContacted"),
   weakEvidenceOnly: $("weakEvidenceOnly"),
   teacherRows: $("teacherRows"),
   tablePane: document.querySelector(".table-pane"),
-  content: document.querySelector(".content"),
+  workbench: $("workbench"),
   calendarPane: $("calendarPane"),
+  calendarLayout: $("calendarLayout"),
+  calendarToggle: $("calendarToggle"),
+  calendarCollapsedSummary: $("calendarCollapsedSummary"),
   calendarPrev: $("calendarPrev"),
   calendarToday: $("calendarToday"),
   calendarNext: $("calendarNext"),
-  calendarMonthLabel: $("calendarMonthLabel"),
-  calendarMonthSummary: $("calendarMonthSummary"),
-  calendarWarnings: $("calendarWarnings"),
+  calendarRangeLabel: $("calendarRangeLabel"),
+  calendarRangeSummary: $("calendarRangeSummary"),
+  calendarLegend: $("calendarLegend"),
   calendarGrid: $("calendarGrid"),
-  calendarAgenda: $("calendarAgenda"),
+  calendarSelectedDate: $("calendarSelectedDate"),
+  calendarSelectedCount: $("calendarSelectedCount"),
+  calendarSelectedTeachers: $("calendarSelectedTeachers"),
+  missingDateSection: $("missingDateSection"),
   missingDateCount: $("missingDateCount"),
   missingDateList: $("missingDateList"),
   detailPane: $("detailPane"),
+  detailToggle: $("detailToggle"),
 };
 
 function norm(value) {
@@ -125,15 +100,43 @@ function validDateIso(value) {
   return date.getFullYear() === year && date.getMonth() + 1 === month && date.getDate() === day ? text : "";
 }
 
-function calendarMonthIso(value = localTodayIso()) {
-  const date = validDateIso(value) || localTodayIso();
-  return `${date.slice(0, 7)}-01`;
+function dateToIso(date) {
+  const offset = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 10);
 }
 
-function addCalendarMonths(monthIso, offset) {
-  const [year, month] = calendarMonthIso(monthIso).split("-").map(Number);
-  const date = new Date(year, month - 1 + offset, 1);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
+function startOfCalendarWeek(value = localTodayIso()) {
+  const valid = validDateIso(value) || localTodayIso();
+  const date = new Date(`${valid}T00:00:00`);
+  const mondayOffset = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - mondayOffset);
+  return dateToIso(date);
+}
+
+function addCalendarDays(dateIso, offset) {
+  const valid = validDateIso(dateIso) || localTodayIso();
+  const date = new Date(`${valid}T00:00:00`);
+  date.setDate(date.getDate() + offset);
+  return dateToIso(date);
+}
+
+function normalizeInterviewAt(value) {
+  const text = norm(value).replace(" ", "T").slice(0, 16);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(text)) return "";
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? "" : text;
+}
+
+function formatInterviewAt(value, includeDate = true) {
+  const interviewAt = normalizeInterviewAt(value);
+  if (!interviewAt) return "";
+  const date = new Date(interviewAt);
+  return new Intl.DateTimeFormat("zh-CN", {
+    ...(includeDate ? { month: "numeric", day: "numeric" } : {}),
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
 }
 
 function formatCalendarDay(dateIso, options = {}) {
@@ -165,6 +168,15 @@ const CALENDAR_RESPONSE_STYLES = {
 };
 
 const CALENDAR_RESPONSE_PRIORITY = ["已满", "考核", "约面试", "添加微信", "官回", "已发"];
+const CALENDAR_LEGEND = [
+  ["已发", "response-sent"],
+  ["官回", "response-official"],
+  ["添加微信", "response-wechat"],
+  ["约面试", "response-interview"],
+  ["考核", "response-assessment"],
+  ["已满", "response-full"],
+  ["未记录", "response-unset"],
+];
 
 function calendarResponseState(record) {
   const responses = splitResponses(record.contact?.responses || record.raw[CONTACT_RESPONSE_COLUMN]);
@@ -214,6 +226,7 @@ function normalizeContactEntry(value) {
     status: normalizeStatus(value.status || value.contactStatus || value[STATUS_COLUMN]),
     contacted_at: norm(value.contacted_at || value.contactedAt || value.date || value[CONTACT_DATE_COLUMN]),
     responses: responseParts.known,
+    interview_at: normalizeInterviewAt(value.interview_at || value.interviewAt || value[INTERVIEW_TIME_COLUMN]),
     note: uniqueJoinText([
       value.note,
       value.contact_note,
@@ -235,6 +248,7 @@ function contactEntryFromRow(row) {
     status: row[STATUS_COLUMN],
     contacted_at: row[CONTACT_DATE_COLUMN],
     responses: row[CONTACT_RESPONSE_COLUMN],
+    interview_at: row[INTERVIEW_TIME_COLUMN],
     note: row[CONTACT_NOTE_COLUMN],
     ...Object.fromEntries(LEGACY_CONTACT_NOTE_COLUMNS.map((column) => [column, row[column]])),
   });
@@ -248,19 +262,13 @@ function mergeContactEntries(base, override) {
 
 function entryHasData(entry) {
   const normalized = normalizeContactEntry(entry);
-  return Boolean(normalized.status || normalized.contacted_at || normalized.responses?.length || normalized.note);
-}
-
-function targetKey(schoolSlug, collegeSlug) {
-  return `${schoolSlug}/${collegeSlug}`;
-}
-
-function makeKey(record) {
-  const row = record.raw || record;
-  const name = norm(row["姓名"]);
-  const teacherUrl = norm(row["教师主页链接"]);
-  const personalUrl = norm(row["个人主页"]);
-  return `${targetKey(record.schoolSlug, record.collegeSlug)}|${name}|${teacherUrl || personalUrl}`;
+  return Boolean(
+    normalized.status ||
+      normalized.contacted_at ||
+      normalized.responses?.length ||
+      normalized.interview_at ||
+      normalized.note
+  );
 }
 
 function escapeHtml(value) {
@@ -289,6 +297,7 @@ function applyContactEntryToRecord(record, entry) {
   record.raw[STATUS_COLUMN] = record.status;
   record.raw[CONTACT_DATE_COLUMN] = contact.contacted_at || "";
   record.raw[CONTACT_RESPONSE_COLUMN] = joinResponses(contact.responses || []);
+  record.raw[INTERVIEW_TIME_COLUMN] = contact.interview_at || "";
   record.raw[CONTACT_NOTE_COLUMN] = contact.note || "";
   LEGACY_CONTACT_NOTE_COLUMNS.forEach((column) => {
     if (column in record.raw) record.raw[column] = "";
@@ -307,16 +316,6 @@ function setDirty(isDirty) {
   els.summary.classList.toggle("dirty", isDirty);
 }
 
-function setApiMode(enabled) {
-  state.apiMode = enabled;
-  els.pickOutputs.textContent = enabled ? "刷新" : "打开";
-  els.pickOutputs.title = enabled ? "从本地服务重新加载 outputs" : "选择 outputs 目录";
-  els.fileInput.closest(".file-button").style.display = enabled ? "none" : "";
-  els.statusInput.closest(".file-button").style.display = enabled ? "none" : "";
-  els.saveStatus.title = enabled ? "保存到 outputs/contact_status.json" : "保存 contact_status.json";
-  els.syncExcel.style.display = enabled ? "" : "none";
-}
-
 function setSummary() {
   const total = state.records.length;
   const shown = state.filtered.length;
@@ -324,10 +323,8 @@ function setSummary() {
   const blocked = state.records.filter((record) =>
     ["先不考虑", "不可能", "不匹配"].includes(record.status),
   ).length;
-  const viewLabels = { calendar: "套磁日历 · " };
-  const viewLabel = viewLabels[state.viewMode] || "";
   els.summary.textContent = total
-    ? `${viewLabel}${shown}/${total} 位教师 · 已套磁 ${contacted} · 排除 ${blocked}`
+    ? `${shown}/${total} 位教师 · 已套磁 ${contacted} · 排除 ${blocked}`
     : "未加载数据";
 }
 
@@ -339,6 +336,81 @@ function showToast(message) {
   node.textContent = message;
   document.body.appendChild(node);
   window.setTimeout(() => node.remove(), 3000);
+}
+
+function readSidebarPreference() {
+  try {
+    return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeSidebarPreference(collapsed) {
+  try {
+    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, collapsed ? "1" : "0");
+  } catch {
+    // The layout still works when local storage is unavailable.
+  }
+}
+
+function sidebarCanCollapse() {
+  return window.matchMedia("(min-width: 1101px)").matches;
+}
+
+function applySidebarState() {
+  const canCollapse = sidebarCanCollapse();
+  const collapsed = canCollapse && state.sidebarCollapsed;
+  els.workbench.classList.toggle("sidebar-collapsed", collapsed);
+  els.detailPane.hidden = collapsed;
+  els.detailToggle.hidden = !canCollapse;
+  els.detailToggle.textContent = collapsed ? "<" : ">";
+  els.detailToggle.title = collapsed ? "展开教师详情" : "收起教师详情";
+  els.detailToggle.setAttribute("aria-label", els.detailToggle.title);
+  els.detailToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+}
+
+function setSidebarCollapsed(collapsed) {
+  state.sidebarCollapsed = Boolean(collapsed);
+  writeSidebarPreference(state.sidebarCollapsed);
+  applySidebarState();
+}
+
+function readCalendarPreference() {
+  try {
+    return window.localStorage.getItem(CALENDAR_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeCalendarPreference(collapsed) {
+  try {
+    window.localStorage.setItem(CALENDAR_STORAGE_KEY, collapsed ? "1" : "0");
+  } catch {
+    // The calendar remains usable when local storage is unavailable.
+  }
+}
+
+function applyCalendarState() {
+  const collapsed = state.calendarCollapsed;
+  els.appShell.classList.toggle("calendar-collapsed", collapsed);
+  els.calendarPane.classList.toggle("is-collapsed", collapsed);
+  els.calendarLayout.hidden = collapsed;
+  els.calendarToggle.textContent = collapsed ? "展开日历 ⌄" : "收起日历 ⌃";
+  els.calendarToggle.title = collapsed ? "展开套磁日历" : "收起套磁日历";
+  els.calendarToggle.setAttribute("aria-label", els.calendarToggle.title);
+  els.calendarToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+}
+
+function setCalendarCollapsed(collapsed) {
+  state.calendarCollapsed = Boolean(collapsed);
+  writeCalendarPreference(state.calendarCollapsed);
+  applyCalendarState();
+}
+
+function detailToolbar() {
+  return '<div class="detail-toolbar"><span>教师详情</span></div>';
 }
 
 async function postJson(url, payload) {
@@ -362,7 +434,6 @@ function contactPayload(record) {
 }
 
 function queueContactSave(record) {
-  if (!state.apiMode) return;
   const payload = { key: record.key, entry: contactPayload(record) };
   state.pendingSaves += 1;
   setDirty(true);
@@ -383,120 +454,10 @@ function queueContactSave(record) {
     });
 }
 
-function parseTargetFromPath(path, fileName) {
-  const normalized = path.replaceAll("\\", "/");
-  const parts = normalized.split("/").filter(Boolean);
-  const outputIndex = parts.indexOf("outputs");
-  if (outputIndex >= 0 && parts.length > outputIndex + 2) {
-    return { schoolSlug: parts[outputIndex + 1], collegeSlug: parts[outputIndex + 2] };
-  }
-  if (parts.length >= 3) {
-    const filePart = parts[parts.length - 1];
-    if (FINAL_FILE_PATTERN.test(filePart)) {
-      return { schoolSlug: parts[parts.length - 3], collegeSlug: parts[parts.length - 2] };
-    }
-  }
-  const match = fileName.match(/^([^_]+)_(.+)_teacher_match_full_research\.xlsx$/i);
-  if (match) return { schoolSlug: match[1], collegeSlug: match[2] };
-  return { schoolSlug: "", collegeSlug: "" };
-}
-
-function sheetRows(workbook, sheetName) {
-  const sheet = workbook.Sheets[sheetName];
-  if (!sheet) return [];
-  return XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
-}
-
-function buildRecord(raw, meta, details) {
-  const record = {
-    schoolSlug: meta.schoolSlug,
-    collegeSlug: meta.collegeSlug,
-    schoolName: SCHOOL_NAMES[meta.schoolSlug] || meta.schoolSlug,
-    collegeName: COLLEGE_NAMES[targetKey(meta.schoolSlug, meta.collegeSlug)] || meta.collegeSlug,
-    sourcePath: meta.path,
-    raw: { ...raw },
-    dblp: [],
-    arxiv: [],
-    web: [],
-    webSearch: [],
-    contact: {},
-    status: "",
-    key: "",
-  };
-  record.key = makeKey(record);
-  applyContactEntryToRecord(record, contactEntryForRecord(record));
-
-  const name = norm(raw["姓名"]);
-  const teacherUrl = norm(raw["教师主页链接"]);
-  record.dblp = details.dblp.filter((item) => sameTeacher(item, name, teacherUrl));
-  record.arxiv = details.arxiv.filter((item) => sameTeacher(item, name, teacherUrl));
-  record.web = details.web.filter((item) => sameTeacher(item, name, teacherUrl));
-  record.webSearch = details.webSearch.filter((item) => sameTeacher(item, name, teacherUrl));
-  return record;
-}
-
-function sameTeacher(item, name, teacherUrl) {
-  if (norm(item["姓名"]) !== name) return false;
-  const itemTeacherUrl = norm(item["教师主页链接"]);
-  return !itemTeacherUrl || !teacherUrl || itemTeacherUrl === teacherUrl;
-}
-
-async function readWorkbookFile(file, path) {
-  if (!FINAL_FILE_PATTERN.test(file.name) || file.name.startsWith("~$")) return [];
-  const meta = parseTargetFromPath(path, file.name);
-  if (!meta.schoolSlug || !meta.collegeSlug) return [];
-  meta.path = path;
-  const data = await file.arrayBuffer();
-  const workbook = XLSX.read(data, { type: "array" });
-  const rows = sheetRows(workbook, "全量教师名录");
-  const details = {
-    dblp: sheetRows(workbook, "DBLP近三年明细").concat(sheetRows(workbook, "DBLP近三年论文明细")),
-    arxiv: sheetRows(workbook, "arXiv近三年明细"),
-    web: sheetRows(workbook, "网页证据明细"),
-    webSearch: sheetRows(workbook, "WebSearch证据明细"),
-  };
-  return rows.map((row) => buildRecord(row, meta, details));
-}
-
-async function walkDirectory(handle, prefix = "") {
-  const files = [];
-  for await (const [name, entry] of handle.entries()) {
-    const path = prefix ? `${prefix}/${name}` : name;
-    if (entry.kind === "directory") {
-      files.push(...(await walkDirectory(entry, path)));
-    } else if (entry.kind === "file") {
-      files.push({ handle: entry, path });
-    }
-  }
-  return files;
-}
-
-async function getOutputsHandle(rootHandle) {
-  if (rootHandle.name === "outputs") return rootHandle;
-  try {
-    return await rootHandle.getDirectoryHandle("outputs");
-  } catch {
-    return rootHandle;
-  }
-}
-
-async function loadStatusFromHandle(outputsHandle) {
-  try {
-    const handle = await outputsHandle.getFileHandle("contact_status.json", { create: false });
-    const file = await handle.getFile();
-    const text = await file.text();
-    state.statusStore = normalizeStore(JSON.parse(text));
-    state.statusHandle = handle;
-  } catch {
-    state.statusStore = { version: 3, updated_at: "", statuses: {} };
-    state.statusHandle = null;
-  }
-}
-
 function normalizeStore(data) {
-  const store = { version: 2, updated_at: "", statuses: {} };
+  const store = { version: 4, updated_at: "", statuses: {} };
   if (!data || typeof data !== "object") return store;
-  store.version = Math.max(Number(data.version || 1), 2);
+  store.version = Math.max(Number(data.version || 1), 4);
   store.updated_at = data.updated_at || data.updatedAt || "";
   const statuses = data.statuses || data.records || {};
   Object.entries(statuses).forEach(([key, value]) => {
@@ -512,56 +473,12 @@ function mergeLoadedRecords(records) {
     return record;
   });
   state.records.sort(compareRecords);
+  state.tableRenderLimit = TABLE_BATCH_SIZE;
   state.selectedKey = state.records[0]?.key || "";
   populateFilters();
+  applyCalendarFilters();
   applyFilters();
   setDirty(false);
-}
-
-async function openOutputsDirectory() {
-  if (!window.showDirectoryPicker) {
-    showToast("当前浏览器不支持目录授权");
-    return;
-  }
-  const rootHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-  const outputsHandle = await getOutputsHandle(rootHandle);
-  state.outputsHandle = outputsHandle;
-  await loadStatusFromHandle(outputsHandle);
-  const files = await walkDirectory(outputsHandle);
-  const records = [];
-  for (const item of files) {
-    if (!FINAL_FILE_PATTERN.test(item.path)) continue;
-    const file = await item.handle.getFile();
-    records.push(...(await readWorkbookFile(file, item.path)));
-  }
-  mergeLoadedRecords(records);
-  showToast(`已加载 ${records.length} 位教师`);
-}
-
-async function handleFileInput(event) {
-  const files = Array.from(event.target.files || []);
-  if (!files.length) return;
-  const jsonFile = files.find((file) => file.name === "contact_status.json");
-  if (jsonFile) {
-    const text = await jsonFile.text();
-    state.statusStore = normalizeStore(JSON.parse(text));
-  }
-  const records = [];
-  for (const file of files) {
-    const path = file.webkitRelativePath || file.name;
-    records.push(...(await readWorkbookFile(file, path)));
-  }
-  mergeLoadedRecords(records);
-  showToast(`已加载 ${records.length} 位教师`);
-}
-
-async function handleStatusInput(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  const text = await file.text();
-  state.statusStore = normalizeStore(JSON.parse(text));
-  mergeLoadedRecords(state.records);
-  showToast("状态已导入");
 }
 
 async function loadFromApi() {
@@ -571,6 +488,9 @@ async function loadFromApi() {
   }
   if (!sessionResponse.ok) throw new Error(`会话初始化失败：${sessionResponse.status}`);
   const session = await sessionResponse.json();
+  if (Number(session.apiVersion || 0) < 4) {
+    throw new Error("当前运行的是旧版看板服务，请关闭旧服务后重新运行 start_viewer.bat");
+  }
   state.csrfToken = norm(session.token);
   if (!state.csrfToken) throw new Error("会话令牌缺失");
   const response = await fetch("/api/data", { cache: "no-store" });
@@ -588,6 +508,9 @@ async function loadFromApi() {
     arxiv: record.arxiv || [],
     web: record.web || [],
     webSearch: record.webSearch || [],
+    detailsLoaded: false,
+    detailsLoading: false,
+    detailsError: "",
     contact: normalizeContactEntry(record.contact || {}),
     status: normalizeStatus(record.status),
     key: record.key,
@@ -628,35 +551,45 @@ function populateCollegeFilter() {
   populateSelect(els.collegeFilter, collegeValuesForSelectedSchool(), "全部学院");
 }
 
+function calendarCollegeValuesForSelectedSchool() {
+  const school = els.calendarSchoolFilter.value;
+  return [
+    ...new Set(
+      state.records
+        .filter((record) => !school || record.schoolName === school)
+        .map((record) => record.collegeName)
+        .filter(Boolean),
+    ),
+  ].sort();
+}
+
+function populateCalendarCollegeFilter() {
+  populateSelect(els.calendarCollegeFilter, calendarCollegeValuesForSelectedSchool(), "全部学院");
+}
+
 function populateFilters() {
+  const schools = [...new Set(state.records.map((record) => record.schoolName).filter(Boolean))].sort();
   populateSelect(
     els.schoolFilter,
-    [...new Set(state.records.map((record) => record.schoolName).filter(Boolean))].sort(),
+    schools,
     "全部学校",
   );
+  populateSelect(els.calendarSchoolFilter, schools, "全部学校");
   populateCollegeFilter();
+  populateCalendarCollegeFilter();
   populateSelect(els.levelFilter, ["强烈建议", "可以考虑", "暂不优先"], "全部推荐");
   populateSelect(els.contactFilter, VALID_STATUSES, "全部状态");
 }
 
-function renderViewTabs() {
-  const buttons = Array.from(els.viewTabs.querySelectorAll("button[data-view]"));
-  buttons.forEach((button) => {
-    const active = button.dataset.view === state.viewMode;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", active ? "true" : "false");
+function applyCalendarFilters() {
+  const school = els.calendarSchoolFilter.value;
+  const college = els.calendarCollegeFilter.value;
+  state.calendarFiltered = state.records.filter((record) => {
+    if (school && record.schoolName !== school) return false;
+    if (college && record.collegeName !== college) return false;
+    return true;
   });
-  els.tablePane.hidden = state.viewMode === "calendar";
-  els.calendarPane.hidden = state.viewMode !== "calendar";
-  els.content.classList.toggle("calendar-mode", state.viewMode === "calendar");
-}
-
-function setViewMode(viewMode) {
-  if (!["all", "calendar"].includes(viewMode)) return;
-  state.viewMode = viewMode;
-  if (viewMode === "calendar" && !state.calendarMonth) state.calendarMonth = calendarMonthIso();
-  renderViewTabs();
-  applyFilters();
+  renderCalendar();
 }
 
 function compareRecords(a, b) {
@@ -698,6 +631,7 @@ function searchableText(record) {
     row["推荐理由"],
     record.raw[CONTACT_DATE_COLUMN],
     record.raw[CONTACT_RESPONSE_COLUMN],
+    record.raw[INTERVIEW_TIME_COLUMN],
     record.raw[CONTACT_NOTE_COLUMN],
   ]
     .map(norm)
@@ -711,7 +645,6 @@ function applyFilters() {
   const college = els.collegeFilter.value;
   const level = els.levelFilter.value;
   const status = els.contactFilter.value;
-  const minScore = numberValue(els.minScore.value);
   const contactedOnly = els.contactedOnly.checked;
   const hideMarked = els.hideContacted.checked;
   const weakOnly = els.weakEvidenceOnly.checked;
@@ -725,14 +658,16 @@ function applyFilters() {
     if (college && record.collegeName !== college) return false;
     if (level && norm(row["推荐等级"]) !== level) return false;
     if (status && record.status !== status) return false;
-    if (minScore && numberValue(row["匹配分"]) < minScore) return false;
     if (weakOnly && !isWeakEvidence(record)) return false;
     return true;
   });
-  if (!state.filtered.some((record) => record.key === state.selectedKey)) {
+  state.filtered.sort(compareRecords);
+  state.tableRenderLimit = TABLE_BATCH_SIZE;
+  els.tablePane.scrollTop = 0;
+  if (!state.records.some((record) => record.key === state.selectedKey)) {
     state.selectedKey = state.filtered[0]?.key || "";
   }
-  renderActiveView();
+  renderTable();
   renderDetail();
   setSummary();
 }
@@ -932,6 +867,7 @@ function contactSummary(record) {
   return uniqueParts([
     ["时间", entry.contacted_at],
     ["回复", joinResponses(entry.responses || [])],
+    ["约面试", formatInterviewAt(entry.interview_at)],
     ["回复备注", entry.note],
   ])
     .map(([label, value]) => `${label}: ${value}`)
@@ -940,13 +876,14 @@ function contactSummary(record) {
 
 function renderTable() {
   const fragment = document.createDocumentFragment();
-  state.filtered.forEach((record) => {
+  state.filtered.slice(0, state.tableRenderLimit).forEach((record) => {
     const row = record.raw;
     const tr = document.createElement("tr");
+    tr.dataset.recordKey = record.key;
     if (record.key === state.selectedKey) tr.classList.add("selected");
     tr.addEventListener("click", () => {
       state.selectedKey = record.key;
-      renderTable();
+      updateSelectedElements();
       renderDetail();
     });
 
@@ -967,9 +904,9 @@ function renderTable() {
 }
 
 function selectCalendarRecord(key) {
-  if (!state.filtered.some((record) => record.key === key)) return;
+  if (!state.calendarFiltered.some((record) => record.key === key)) return;
   state.selectedKey = key;
-  renderActiveView();
+  updateSelectedElements();
   renderDetail();
   if (window.matchMedia("(max-width: 900px)").matches) {
     els.detailPane.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -979,10 +916,13 @@ function selectCalendarRecord(key) {
 function calendarEventButton(record, compact = false) {
   const button = document.createElement("button");
   button.type = "button";
+  button.dataset.recordKey = record.key;
   const responseState = calendarResponseState(record);
-  button.className = `calendar-event ${responseState.className}${record.key === state.selectedKey ? " selected" : ""}${compact ? " compact" : ""}`;
+  const interviewText = formatInterviewAt(record.contact?.interview_at);
+  button.className = `calendar-event ${responseState.className}${record.key === state.selectedKey ? " selected" : ""}${interviewText ? " has-interview" : ""}${compact ? " compact" : ""}`;
   const responseText = responseState.responses.join(" · ") || "未记录回复";
-  button.title = `${norm(record.raw["姓名"])} · ${record.schoolName} · ${record.collegeName} · ${responseText}`;
+  const responseWithInterview = interviewText ? `${responseText} · ◆ 面试 ${interviewText}` : responseText;
+  button.title = `${norm(record.raw["姓名"])} · ${record.schoolName} · ${record.collegeName} · ${responseWithInterview}`;
   const name = document.createElement("span");
   name.className = "calendar-event-name";
   name.textContent = norm(record.raw["姓名"]);
@@ -993,185 +933,192 @@ function calendarEventButton(record, compact = false) {
   response.className = "calendar-event-response";
   response.textContent = compact && responseState.responses.length > 1
     ? `${responseState.primary} +${responseState.responses.length - 1}`
-    : responseText;
+    : responseWithInterview;
   button.append(name, institution, response);
   button.addEventListener("click", () => selectCalendarRecord(record.key));
   return button;
 }
 
-function recordsByContactDate(records) {
+function recordsByCalendarDate(records) {
   const grouped = new Map();
   records.forEach((record) => {
-    const date = validDateIso(record.contact?.contacted_at || record.raw[CONTACT_DATE_COLUMN]);
-    if (!date) return;
-    if (!grouped.has(date)) grouped.set(date, []);
-    grouped.get(date).push(record);
+    const dates = new Set([
+      validDateIso(record.contact?.contacted_at || record.raw[CONTACT_DATE_COLUMN]),
+      normalizeInterviewAt(record.contact?.interview_at || record.raw[INTERVIEW_TIME_COLUMN]).slice(0, 10),
+    ]);
+    dates.delete("");
+    dates.forEach((date) => {
+      if (!grouped.has(date)) grouped.set(date, []);
+      grouped.get(date).push(record);
+    });
   });
   grouped.forEach((items) => items.sort((a, b) => norm(a.raw["姓名"]).localeCompare(norm(b.raw["姓名"]), "zh-CN")));
   return grouped;
 }
 
-function calendarMonthRecords() {
-  const monthPrefix = calendarMonthIso(state.calendarMonth).slice(0, 7);
-  return state.filtered.filter((record) => {
-    const date = validDateIso(record.contact?.contacted_at || record.raw[CONTACT_DATE_COLUMN]);
-    return date.startsWith(monthPrefix);
+function calendarRangeDates() {
+  const start = state.calendarRangeStart || startOfCalendarWeek();
+  return Array.from({ length: 28 }, (_, index) => addCalendarDays(start, index));
+}
+
+function recordsInCalendarRange(dates) {
+  const start = dates[0];
+  const end = dates[dates.length - 1];
+  return state.calendarFiltered.filter((record) => {
+    const contactDate = validDateIso(record.contact?.contacted_at || record.raw[CONTACT_DATE_COLUMN]);
+    const interviewDate = normalizeInterviewAt(record.contact?.interview_at || record.raw[INTERVIEW_TIME_COLUMN]).slice(0, 10);
+    return (contactDate >= start && contactDate <= end) || (interviewDate >= start && interviewDate <= end);
   });
 }
 
-function calendarDensityWarnings(records) {
-  const warnings = [];
-  const sameUnit = new Map();
+function calendarResponseCounts(records) {
+  const counts = new Map(CALENDAR_LEGEND.map(([label]) => [label, 0]));
   records.forEach((record) => {
-    const date = validDateIso(record.contact?.contacted_at || record.raw[CONTACT_DATE_COLUMN]);
-    const key = `${date}|${record.schoolName}|${record.collegeName}`;
-    if (!sameUnit.has(key)) sameUnit.set(key, []);
-    sameUnit.get(key).push(record);
-  });
-  sameUnit.forEach((items, key) => {
-    if (items.length < 3) return;
-    const [date, school, college] = key.split("|");
-    warnings.push({
-      key: `same-unit:${key}`,
-      title: "同日同学院较集中",
-      text: `${formatCalendarDay(date, { month: "long", day: "numeric" })}向${school} · ${college}记录了 ${items.length} 位教师，请确认是否符合发送节奏。`,
-    });
-  });
-
-  const bySchool = new Map();
-  records.forEach((record) => {
-    const date = validDateIso(record.contact?.contacted_at || record.raw[CONTACT_DATE_COLUMN]);
-    if (!bySchool.has(record.schoolName)) bySchool.set(record.schoolName, []);
-    bySchool.get(record.schoolName).push({ date, record });
-  });
-  bySchool.forEach((items, school) => {
-    items.sort((a, b) => a.date.localeCompare(b.date));
-    let best = null;
-    for (let start = 0; start < items.length; start += 1) {
-      const startTime = new Date(`${items[start].date}T00:00:00`).getTime();
-      let end = start;
-      while (end + 1 < items.length) {
-        const nextTime = new Date(`${items[end + 1].date}T00:00:00`).getTime();
-        if (nextTime - startTime > 6 * 24 * 60 * 60 * 1000) break;
-        end += 1;
-      }
-      const count = end - start + 1;
-      if (count >= 5 && (!best || count > best.count)) best = { start, end, count };
+    const responses = calendarResponseState(record).responses;
+    if (!responses.length) {
+      counts.set("未记录", counts.get("未记录") + 1);
+      return;
     }
-    if (!best) return;
-    const first = items[best.start].date;
-    const last = items[best.end].date;
-    warnings.push({
-      key: `school-window:${school}:${first}:${last}`,
-      title: "短期内同校发送较密集",
-      text: `${formatCalendarDay(first, { month: "numeric", day: "numeric" })}—${formatCalendarDay(last, { month: "numeric", day: "numeric" })}向${school}记录了 ${best.count} 位教师，仅作节奏提醒。`,
+    responses.forEach((response) => {
+      if (counts.has(response)) counts.set(response, counts.get(response) + 1);
     });
   });
-  return warnings;
+  return counts;
 }
 
-function renderCalendarWarnings(records) {
+function relativeWeekLabel(weekStart) {
+  const current = new Date(`${startOfCalendarWeek()}T00:00:00`).getTime();
+  const target = new Date(`${weekStart}T00:00:00`).getTime();
+  const offset = Math.round((target - current) / (7 * 24 * 60 * 60 * 1000));
+  if (offset === 0) return "本周";
+  if (offset === -1) return "上周";
+  if (offset === 1) return "下周";
+  return offset < 0 ? `前${Math.abs(offset)}周` : `后${offset}周`;
+}
+
+function renderCalendarLegend(records, dates) {
   const fragment = document.createDocumentFragment();
-  calendarDensityWarnings(records)
-    .filter((warning) => !state.dismissedCalendarWarnings.has(warning.key))
-    .forEach((warning) => {
-      const node = document.createElement("div");
-      node.className = "calendar-warning";
-      const copy = document.createElement("div");
-      const title = document.createElement("strong");
-      title.textContent = warning.title;
-      const text = document.createElement("span");
-      text.textContent = warning.text;
-      copy.append(title, text);
-      const close = document.createElement("button");
-      close.type = "button";
-      close.className = "calendar-warning-close";
-      close.textContent = "关闭";
-      close.addEventListener("click", () => {
-        state.dismissedCalendarWarnings.add(warning.key);
-        renderCalendarWarnings(records);
-      });
-      node.append(copy, close);
-      fragment.appendChild(node);
-    });
-  els.calendarWarnings.replaceChildren(fragment);
+  const counts = calendarResponseCounts(records);
+  CALENDAR_LEGEND.forEach(([label, className]) => {
+    const item = document.createElement("span");
+    item.className = `calendar-legend-item ${className}`;
+    item.title = `${label}：当前四周 ${counts.get(label)} 条状态记录`;
+    const dot = document.createElement("i");
+    const text = document.createElement("span");
+    text.textContent = label;
+    const count = document.createElement("strong");
+    count.textContent = String(counts.get(label));
+    item.append(dot, text, count);
+    fragment.appendChild(item);
+  });
+  const interviewCount = state.calendarFiltered.filter((record) => {
+    const date = normalizeInterviewAt(record.contact?.interview_at).slice(0, 10);
+    return dates.includes(date);
+  }).length;
+  const interviewItem = document.createElement("span");
+  interviewItem.className = "calendar-legend-item calendar-interview-legend";
+  interviewItem.title = `已安排具体面试时间：当前四周 ${interviewCount} 位教师`;
+  const diamond = document.createElement("i");
+  const label = document.createElement("span");
+  label.textContent = "已定时间";
+  const count = document.createElement("strong");
+  count.textContent = String(interviewCount);
+  interviewItem.append(diamond, label, count);
+  fragment.appendChild(interviewItem);
+  els.calendarLegend.replaceChildren(fragment);
 }
 
-function renderCalendarGrid(grouped) {
-  const [year, month] = calendarMonthIso(state.calendarMonth).split("-").map(Number);
-  const first = new Date(year, month - 1, 1);
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const leading = (first.getDay() + 6) % 7;
+function renderCalendarGrid(grouped, dates) {
+  const fragment = document.createDocumentFragment();
   const today = localTodayIso();
-  const fragment = document.createDocumentFragment();
-  ["一", "二", "三", "四", "五", "六", "日"].forEach((label) => {
-    const header = document.createElement("div");
-    header.className = "calendar-weekday";
-    header.textContent = label;
-    fragment.appendChild(header);
-  });
-  const cellCount = Math.ceil((leading + daysInMonth) / 7) * 7;
-  for (let index = 0; index < cellCount; index += 1) {
-    const day = index - leading + 1;
-    const cell = document.createElement("section");
-    cell.className = "calendar-day";
-    if (day < 1 || day > daysInMonth) {
-      cell.classList.add("outside-month");
-      cell.setAttribute("aria-hidden", "true");
-      fragment.appendChild(cell);
-      continue;
-    }
-    const date = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    if (date === today) cell.classList.add("today");
-    const events = grouped.get(date) || [];
-    const head = document.createElement("div");
-    head.className = "calendar-day-head";
-    const number = document.createElement("span");
-    number.className = "calendar-day-number";
-    number.textContent = String(day);
-    head.appendChild(number);
-    if (events.length) {
-      const count = document.createElement("span");
-      count.className = "count-badge";
-      count.textContent = String(events.length);
-      head.appendChild(count);
-    }
-    const list = document.createElement("div");
-    list.className = "calendar-day-events";
-    events.forEach((record) => list.appendChild(calendarEventButton(record, true)));
-    cell.append(head, list);
-    fragment.appendChild(cell);
+  for (let weekIndex = 0; weekIndex < 4; weekIndex += 1) {
+    const weekDates = dates.slice(weekIndex * 7, weekIndex * 7 + 7);
+    const week = document.createElement("section");
+    week.className = "calendar-week-strip";
+    const weekLabel = document.createElement("div");
+    weekLabel.className = "calendar-week-label";
+    weekLabel.textContent = relativeWeekLabel(weekDates[0]);
+    weekLabel.title = `${formatCalendarDay(weekDates[0], { month: "numeric", day: "numeric" })}—${formatCalendarDay(weekDates[6], { month: "numeric", day: "numeric" })}`;
+    const days = document.createElement("div");
+    days.className = "calendar-week-days";
+    weekDates.forEach((date) => {
+      const records = grouped.get(date) || [];
+      const day = document.createElement("button");
+      day.type = "button";
+      day.className = "calendar-strip-day";
+      day.dataset.date = date;
+      day.dataset.date = date;
+      if (date === today) day.classList.add("today");
+      if (date === state.selectedCalendarDate) day.classList.add("selected");
+      day.setAttribute("aria-pressed", date === state.selectedCalendarDate ? "true" : "false");
+      day.title = `${formatCalendarDay(date, { year: "numeric", month: "long", day: "numeric", weekday: "long" })} · ${records.length} 位教师`;
+      const heading = document.createElement("span");
+      heading.className = "calendar-strip-day-heading";
+      heading.textContent = formatCalendarDay(date, { month: "numeric", day: "numeric" });
+      const countsNode = document.createElement("span");
+      countsNode.className = "calendar-strip-counts";
+      const counts = calendarResponseCounts(records);
+      CALENDAR_LEGEND.forEach(([label, className]) => {
+        const count = counts.get(label);
+        if (!count) return;
+        const badge = document.createElement("span");
+        badge.className = `calendar-status-count ${className}`;
+        badge.textContent = String(count);
+        badge.title = `${label} ${count}`;
+        countsNode.appendChild(badge);
+      });
+      const interviewCount = records.filter(
+        (record) => normalizeInterviewAt(record.contact?.interview_at).slice(0, 10) === date,
+      ).length;
+      if (interviewCount) {
+        const marker = document.createElement("span");
+        marker.className = "calendar-interview-marker";
+        marker.title = `${interviewCount} 位教师已安排具体面试时间`;
+        marker.innerHTML = `<i></i><strong>${interviewCount}</strong>`;
+        countsNode.appendChild(marker);
+      }
+      if (!records.length) {
+        const empty = document.createElement("span");
+        empty.className = "calendar-strip-empty";
+        empty.textContent = "—";
+        countsNode.appendChild(empty);
+      }
+      day.append(heading, countsNode);
+      day.addEventListener("click", () => {
+        state.selectedCalendarDate = date;
+        renderCalendar();
+      });
+      days.appendChild(day);
+    });
+    week.append(weekLabel, days);
+    fragment.appendChild(week);
   }
   els.calendarGrid.replaceChildren(fragment);
 }
 
-function renderCalendarAgenda(grouped) {
-  const monthPrefix = calendarMonthIso(state.calendarMonth).slice(0, 7);
-  const dates = [...grouped.keys()].filter((date) => date.startsWith(monthPrefix)).sort();
+function renderSelectedCalendarDay(grouped) {
+  const date = state.selectedCalendarDate;
+  const records = grouped.get(date) || [];
+  els.calendarSelectedDate.textContent = formatCalendarDay(date, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    weekday: "long",
+  });
+  els.calendarSelectedCount.textContent = String(records.length);
   const fragment = document.createDocumentFragment();
-  if (!dates.length) {
+  if (!records.length) {
     const empty = document.createElement("div");
-    empty.className = "calendar-empty";
-    empty.textContent = "本月没有符合当前筛选条件的套磁记录";
+    empty.className = "calendar-empty compact";
+    empty.textContent = "当天没有套磁记录";
     fragment.appendChild(empty);
   }
-  dates.forEach((date) => {
-    const section = document.createElement("section");
-    section.className = "agenda-day";
-    const heading = document.createElement("div");
-    heading.className = "agenda-day-heading";
-    heading.textContent = formatCalendarDay(date, { month: "long", day: "numeric", weekday: "short" });
-    const list = document.createElement("div");
-    list.className = "agenda-events";
-    (grouped.get(date) || []).forEach((record) => list.appendChild(calendarEventButton(record)));
-    section.append(heading, list);
-    fragment.appendChild(section);
-  });
-  els.calendarAgenda.replaceChildren(fragment);
+  records.forEach((record) => fragment.appendChild(calendarEventButton(record)));
+  els.calendarSelectedTeachers.replaceChildren(fragment);
 }
 
 function renderMissingDates() {
-  const missing = state.filtered
+  const missing = state.calendarFiltered
     .filter(
       (record) =>
         record.status === "已套磁" &&
@@ -1179,6 +1126,7 @@ function renderMissingDates() {
     )
     .sort(compareRecords);
   els.missingDateCount.textContent = String(missing.length);
+  els.missingDateSection.hidden = !missing.length;
   const fragment = document.createDocumentFragment();
   if (!missing.length) {
     const empty = document.createElement("div");
@@ -1191,21 +1139,40 @@ function renderMissingDates() {
 }
 
 function renderCalendar() {
-  if (!state.calendarMonth) state.calendarMonth = calendarMonthIso();
-  const monthRecords = calendarMonthRecords();
-  const grouped = recordsByContactDate(state.filtered);
-  const [year, month] = calendarMonthIso(state.calendarMonth).split("-").map(Number);
-  els.calendarMonthLabel.textContent = `${year}年${month}月`;
-  els.calendarMonthSummary.textContent = `本月 ${monthRecords.length} 条日程 · 当前筛选共 ${state.filtered.length} 位教师`;
-  renderCalendarWarnings(monthRecords);
-  renderCalendarGrid(grouped);
-  renderCalendarAgenda(grouped);
+  if (!state.calendarRangeStart) state.calendarRangeStart = startOfCalendarWeek();
+  const dates = calendarRangeDates();
+  const grouped = recordsByCalendarDate(state.calendarFiltered);
+  const rangeRecords = recordsInCalendarRange(dates);
+  if (!dates.includes(state.selectedCalendarDate)) {
+    const firstWithRecords = dates.find((date) => (grouped.get(date) || []).length);
+    state.selectedCalendarDate = dates.includes(localTodayIso()) ? localTodayIso() : firstWithRecords || dates[0];
+  }
+  const startLabel = formatCalendarDay(dates[0], { year: "numeric", month: "long", day: "numeric" });
+  const endLabel = formatCalendarDay(dates[27], { year: "numeric", month: "long", day: "numeric" });
+  els.calendarRangeLabel.textContent = `${startLabel}—${endLabel}`;
+  els.calendarRangeSummary.textContent = `四周共 ${rangeRecords.length} 位教师 · 日历范围 ${state.calendarFiltered.length} 位教师`;
+  els.calendarCollapsedSummary.textContent = `${startLabel}起 · ${rangeRecords.length} 位教师`;
+  renderCalendarLegend(rangeRecords, dates);
+  renderCalendarGrid(grouped, dates);
+  renderSelectedCalendarDay(grouped);
   renderMissingDates();
 }
 
-function renderActiveView() {
-  if (state.viewMode === "calendar") renderCalendar();
-  else renderTable();
+function renderOverview() {
+  renderTable();
+  renderCalendar();
+}
+
+function updateSelectedElements() {
+  document.querySelectorAll("[data-record-key]").forEach((element) => {
+    element.classList.toggle("selected", element.dataset.recordKey === state.selectedKey);
+  });
+}
+
+function appendTableBatch() {
+  if (state.tableRenderLimit >= state.filtered.length) return;
+  state.tableRenderLimit = Math.min(state.filtered.length, state.tableRenderLimit + TABLE_BATCH_SIZE);
+  renderTable();
 }
 
 function td(value, className = "") {
@@ -1239,6 +1206,7 @@ function updateStatus(key, status) {
   writeContactEntry(record, entry);
   setDirty(true);
   applyFilters();
+  renderCalendar();
 }
 
 function writeContactEntry(record, entry) {
@@ -1268,7 +1236,7 @@ function updateContactMeta(key, patch, refresh = false) {
   setDirty(true);
   if (refresh) applyFilters();
   else {
-    renderActiveView();
+    renderOverview();
     setSummary();
   }
 }
@@ -1282,6 +1250,10 @@ function dateInputValue(value) {
   return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : "";
 }
 
+function datetimeInputValue(value) {
+  return normalizeInterviewAt(value);
+}
+
 function responseOptions(record) {
   return splitResponses([...DEFAULT_RESPONSES, ...(record.contact?.responses || [])]);
 }
@@ -1289,6 +1261,7 @@ function responseOptions(record) {
 function contactEditorSection(record) {
   const entry = normalizeContactEntry(record.contact || {});
   const selected = new Set(entry.responses || []);
+  const showInterviewField = selected.has("约面试") || Boolean(entry.interview_at);
   const options = responseOptions(record)
     .map((response) => {
       const checked = selected.has(response) ? " checked" : "";
@@ -1302,6 +1275,10 @@ function contactEditorSection(record) {
         <label>
           <span>套磁时间</span>
           <input id="contactDateInput" type="date" value="${escapeHtml(dateInputValue(entry.contacted_at))}" />
+        </label>
+        <label id="interviewTimeField"${showInterviewField ? "" : " hidden"}>
+          <span>约面试时间</span>
+          <input id="interviewTimeInput" type="datetime-local" step="60" value="${escapeHtml(datetimeInputValue(entry.interview_at))}" />
         </label>
         <label>
           <span>回复情况备注</span>
@@ -1317,11 +1294,16 @@ function contactEditorSection(record) {
 
 function bindContactEditor(record) {
   const dateInput = els.detailPane.querySelector("#contactDateInput");
+  const interviewTimeField = els.detailPane.querySelector("#interviewTimeField");
+  const interviewTimeInput = els.detailPane.querySelector("#interviewTimeInput");
   const noteInput = els.detailPane.querySelector("#contactNoteInput");
   const responseInputs = Array.from(els.detailPane.querySelectorAll('input[name="contactResponse"]'));
 
   dateInput?.addEventListener("change", () => {
     updateContactMeta(record.key, { contacted_at: dateInput.value });
+  });
+  interviewTimeInput?.addEventListener("change", () => {
+    updateContactMeta(record.key, { interview_at: interviewTimeInput.value });
   });
   noteInput?.addEventListener("change", () => {
     updateContactMeta(record.key, { note: noteInput.value });
@@ -1329,7 +1311,13 @@ function bindContactEditor(record) {
   responseInputs.forEach((input) => {
     input.addEventListener("change", () => {
       const responses = responseInputs.filter((item) => item.checked).map((item) => item.value);
-      updateContactMeta(record.key, { responses });
+      const hasInterview = responses.includes("约面试");
+      interviewTimeField.hidden = !hasInterview;
+      if (!hasInterview) interviewTimeInput.value = "";
+      updateContactMeta(record.key, {
+        responses,
+        interview_at: hasInterview ? interviewTimeInput.value : "",
+      });
     });
   });
 
@@ -1461,11 +1449,15 @@ function directionSection(row) {
 function renderDetail() {
   const record = currentRecord();
   if (!record) {
-    els.detailPane.innerHTML = '<div class="empty-detail">选择一位教师</div>';
+    els.detailPane.innerHTML = `${detailToolbar()}<div class="empty-detail">选择一位教师</div>`;
+    applySidebarState();
     return;
   }
   const row = record.raw;
+  const shouldLoadDetails = !record.detailsLoaded && !record.detailsLoading && !record.detailsError;
+  if (shouldLoadDetails) record.detailsLoading = true;
   els.detailPane.innerHTML = `
+    ${detailToolbar()}
     <div class="detail-head">
       <div>
         <div class="detail-name">${escapeHtml(row["姓名"])}</div>
@@ -1479,13 +1471,47 @@ function renderDetail() {
     ${contactEditorSection(record)}
     ${extraInfoSection(row)}
     ${linksSection(row)}
-    ${evidenceSection("DBLP近三年", record.dblp, ["年份", "venue", "题名", "链接"])}
-    ${evidenceSection("arXiv近三年", record.arxiv, ["发布日期", "题名", "分类", "链接"])}
-    ${evidenceSection("网页证据", record.web, ["网页URL", "证据"])}
-    ${evidenceSection("WebSearch证据", record.webSearch, ["WebSearch置信度", "来源类型", "标题", "证据", "关键词", "来源URL"])}
+    ${detailEvidenceSections(record)}
   `;
   els.detailPane.querySelector("#detailStatus").appendChild(contactSelect(record));
   bindContactEditor(record);
+  applySidebarState();
+  if (shouldLoadDetails) loadRecordDetails(record);
+}
+
+function detailEvidenceSections(record) {
+  if (record.detailsLoading) {
+    return '<section class="section detail-loading">正在加载论文与网页证据…</section>';
+  }
+  if (record.detailsError) {
+    return `<section class="section detail-error">证据加载失败：${escapeHtml(record.detailsError)}</section>`;
+  }
+  if (!record.detailsLoaded) return "";
+  return [
+    evidenceSection("DBLP近三年", record.dblp, ["年份", "venue", "题名", "链接"]),
+    evidenceSection("arXiv近三年", record.arxiv, ["发布日期", "题名", "分类", "链接"]),
+    evidenceSection("网页证据", record.web, ["网页URL", "证据"]),
+    evidenceSection("WebSearch证据", record.webSearch, ["WebSearch置信度", "来源类型", "标题", "证据", "关键词", "来源URL"]),
+  ].join("");
+}
+
+async function loadRecordDetails(record) {
+  try {
+    const response = await fetch(`/api/detail?key=${encodeURIComponent(record.key)}`, { cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `请求失败：${response.status}`);
+    record.dblp = data.dblp || [];
+    record.arxiv = data.arxiv || [];
+    record.web = data.web || [];
+    record.webSearch = data.webSearch || [];
+    record.detailsLoaded = true;
+    record.detailsError = "";
+  } catch (error) {
+    record.detailsError = error.message || String(error);
+  } finally {
+    record.detailsLoading = false;
+    if (state.selectedKey === record.key) renderDetail();
+  }
 }
 
 function linksSection(row) {
@@ -1518,133 +1544,46 @@ function evidenceSection(title, rows, fields) {
   return `<details class="section evidence-section"><summary><span>${escapeHtml(title)}</span><span class="evidence-count">${rows.length} 条</span></summary><div class="evidence-list">${items.join("")}</div></details>`;
 }
 
-function statusJson() {
-  state.statusStore.version = 3;
-  state.statusStore.statuses = Object.fromEntries(
-    Object.entries(state.statusStore.statuses || {})
-      .map(([key, value]) => [key, normalizeContactEntry(value)])
-      .filter(([, value]) => entryHasData(value)),
-  );
-  state.statusStore.updated_at = new Date().toISOString().slice(0, 19);
-  return JSON.stringify(state.statusStore, null, 2);
-}
-
-async function saveStatus() {
-  if (state.apiMode) {
-    await state.saveQueue.catch(() => {});
-    const store = JSON.parse(statusJson());
-    const data = await postJson("/api/status-store", { statusStore: store });
-    state.statusStore = normalizeStore(data.statusStore || store);
-    state.pendingSaves = 0;
-    state.saveFailures = 0;
-    setDirty(false);
-    showToast("状态已保存到 outputs/contact_status.json");
-    return;
-  }
-  if (state.outputsHandle && !state.statusHandle) {
-    state.statusHandle = await state.outputsHandle.getFileHandle("contact_status.json", { create: true });
-  }
-  if (!state.statusHandle) {
-    downloadStatus();
-    return;
-  }
-  const writable = await state.statusHandle.createWritable();
-  await writable.write(statusJson());
-  await writable.close();
-  setDirty(false);
-  showToast("状态已保存");
-}
-
-async function syncExcel() {
-  if (!state.apiMode) {
-    showToast("请通过 python viewer_server.py 打开网页后同步 Excel");
-    return;
-  }
-  await saveStatus();
-  const result = await postJson("/api/sync-excel", {});
-  const changed = result.synced?.length || 0;
-  const total = result.workbooks || 0;
-  showToast(`已同步 ${changed}/${total} 个工作簿`);
-}
-
-function downloadStatus() {
-  downloadBlob(new Blob([statusJson()], { type: "application/json;charset=utf-8" }), "contact_status.json");
-  setDirty(false);
-}
-
-function downloadBlob(blob, fileName) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-function exportFilteredXlsx() {
-  if (!state.filtered.length) {
-    showToast("没有可导出的行");
-    return;
-  }
-  const rows = state.filtered.map((record) => ({
-    学校: record.schoolName,
-    学院: record.collegeName,
-    归属备注: affiliationSummary(record),
-    套磁时间: record.raw[CONTACT_DATE_COLUMN],
-    回复情况: record.raw[CONTACT_RESPONSE_COLUMN],
-    回复情况备注: record.raw[CONTACT_NOTE_COLUMN],
-    ...record.raw,
-    来源文件: record.sourcePath,
-  }));
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "教师看板");
-  const data = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-  downloadBlob(
-    new Blob([data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
-    "teacher-contact-dashboard.xlsx",
-  );
-}
-
 function bindEvents() {
-  els.pickOutputs.addEventListener("click", () => {
-    const loader = state.apiMode ? loadFromApi : openOutputsDirectory;
-    loader().catch((error) => showToast(error.message));
+  els.tablePane.addEventListener("scroll", () => {
+    const remaining = els.tablePane.scrollHeight - els.tablePane.scrollTop - els.tablePane.clientHeight;
+    if (remaining < 240) appendTableBatch();
   });
-  els.fileInput.addEventListener("change", (event) => handleFileInput(event).catch((error) => showToast(error.message)));
-  els.statusInput.addEventListener("change", (event) => handleStatusInput(event).catch((error) => showToast(error.message)));
-  els.saveStatus.addEventListener("click", () => saveStatus().catch((error) => showToast(error.message)));
-  els.syncExcel.addEventListener("click", () => syncExcel().catch((error) => showToast(error.message)));
-  els.downloadStatus.addEventListener("click", downloadStatus);
-  els.exportXlsx.addEventListener("click", exportFilteredXlsx);
-  els.viewTabs.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-view]");
-    if (!button) return;
-    setViewMode(button.dataset.view);
-  });
+  els.detailToggle.addEventListener("click", () => setSidebarCollapsed(!state.sidebarCollapsed));
+  els.calendarToggle.addEventListener("click", () => setCalendarCollapsed(!state.calendarCollapsed));
   els.calendarPrev.addEventListener("click", () => {
-    state.calendarMonth = addCalendarMonths(state.calendarMonth, -1);
+    state.calendarRangeStart = addCalendarDays(state.calendarRangeStart, -7);
+    state.selectedCalendarDate = "";
     renderCalendar();
   });
   els.calendarToday.addEventListener("click", () => {
-    state.calendarMonth = calendarMonthIso();
+    state.calendarRangeStart = startOfCalendarWeek();
+    state.selectedCalendarDate = localTodayIso();
     renderCalendar();
   });
   els.calendarNext.addEventListener("click", () => {
-    state.calendarMonth = addCalendarMonths(state.calendarMonth, 1);
+    state.calendarRangeStart = addCalendarDays(state.calendarRangeStart, 7);
+    state.selectedCalendarDate = "";
     renderCalendar();
   });
+  els.calendarSchoolFilter.addEventListener("input", () => {
+    populateCalendarCollegeFilter();
+    applyCalendarFilters();
+  });
+  els.calendarCollegeFilter.addEventListener("input", applyCalendarFilters);
   els.schoolFilter.addEventListener("input", () => {
     populateCollegeFilter();
     applyFilters();
   });
+  let searchTimer = 0;
+  els.searchInput.addEventListener("input", () => {
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(applyFilters, SEARCH_DEBOUNCE_MS);
+  });
   [
-    els.searchInput,
     els.collegeFilter,
     els.levelFilter,
     els.contactFilter,
-    els.minScore,
     els.contactedOnly,
     els.hideContacted,
     els.weakEvidenceOnly,
@@ -1654,20 +1593,23 @@ function bindEvents() {
     event.preventDefault();
     event.returnValue = "";
   });
+  window.addEventListener("resize", applySidebarState);
 }
 
 async function init() {
-  state.calendarMonth = calendarMonthIso();
+  state.calendarRangeStart = startOfCalendarWeek();
+  state.selectedCalendarDate = localTodayIso();
+  state.sidebarCollapsed = readSidebarPreference();
+  state.calendarCollapsed = readCalendarPreference();
   bindEvents();
   populateFilters();
-  renderViewTabs();
+  renderOverview();
+  renderDetail();
+  applyCalendarState();
   setSummary();
-  setApiMode(window.location.protocol !== "file:");
-  if (!state.apiMode) return;
   try {
     await loadFromApi();
   } catch (error) {
-    setApiMode(false);
     showToast(`本地服务不可用：${error.message}`);
   }
 }

@@ -119,7 +119,7 @@ Hermes Agent 当前提供以下与本项目直接相关的能力：
 | `audit_targets` | 只读 | 调用 checkpoint doctor 和质量审计 |
 | `list_affiliation_reviews` | 只读 | 返回学院归属待复核项 |
 | `get_recommendations` | 只读 | 按目标和等级读取现有 policy 输出 |
-| `calendar_summary` | 只读 | 返回日期、学校、学院分布和密集提醒 |
+| `calendar_summary` | 只读 | 返回四周状态数量、学校/学院分布和已安排面试时间 |
 | `update_contact_status` | 写入 | 使用稳定教师 ID 更新一条联系状态 |
 
 所有写工具都应：

@@ -8,7 +8,12 @@ from pathlib import Path
 
 os.environ.setdefault("TUTOR_ALLOW_TEMPLATE_PROFILE", "1")
 
-from tutor_recommendation.contact_status import empty_store, load_status_store, save_status_store  # noqa: E402
+from tutor_recommendation.contact_status import (  # noqa: E402
+    empty_store,
+    load_status_store,
+    normalize_contact_entry,
+    save_status_store,
+)
 
 
 class ContactStatusTests(unittest.TestCase):
@@ -16,7 +21,7 @@ class ContactStatusTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = load_status_store(Path(temp_dir) / "missing.json")
         self.assertEqual(store["statuses"], {})
-        self.assertEqual(store["version"], 3)
+        self.assertEqual(store["version"], 4)
 
     def test_corrupt_store_raises(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -31,7 +36,15 @@ class ContactStatusTests(unittest.TestCase):
             path = Path(temp_dir) / "status.json"
             save_status_store(empty_store(), path)
             loaded = load_status_store(path)
-        self.assertEqual(loaded["version"], 3)
+        self.assertEqual(loaded["version"], 4)
+
+    def test_interview_time_is_normalized_to_minutes(self) -> None:
+        entry = normalize_contact_entry({"responses": ["约面试"], "interview_at": "2026-07-15 09:30:45"})
+        self.assertEqual(entry["interview_at"], "2026-07-15T09:30")
+
+    def test_invalid_interview_time_is_discarded(self) -> None:
+        entry = normalize_contact_entry({"responses": ["约面试"], "interview_at": "not-a-date"})
+        self.assertNotIn("interview_at", entry)
 
 
 if __name__ == "__main__":

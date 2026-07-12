@@ -67,11 +67,15 @@ directory into auditable teacher recommendation workbooks:
   bounded web-search supplement.
 - `src/tutor_recommendation/contact_status.py`: local contact-state schema.
 - `src/tutor_recommendation/viewer_server.py` and `viewer/`: local dashboard,
-  contact calendar, and mobile agenda.
+  four-week contact strip, teacher list, and detail workspace.
 - `docs/hermes-agent-evaluation-2026-07-11.md`: Agent-shell and orchestration
   evaluation for Hermes and alternatives.
-- `docs/viewer-integrated-layout-todo.md`: approved follow-up plan for placing
-  the calendar above the teacher list and collapsible detail sidebar.
+- `docs/viewer-integrated-layout.md`: implemented calendar-above-list layout,
+  shared selection behavior, and collapsible detail sidebar contract.
+- `docs/viewer-ux-performance-todo.md`: completed implementation and validation
+  record for independent calendar filters, fixed viewport, and performance work.
+- `docs/viewer-calendar-strip-todo.md`: active four-week strip-calendar work and
+  deferred design questions for cross-school and cross-college contact views.
 - Root `*.py` files are thin CLI wrappers that add `src` to `sys.path`.
 
 ## Common Commands
@@ -173,7 +177,8 @@ Typical files:
 The dashboard stores manual contact state in `outputs/contact_status.json`.
 Excel workbooks are view/delivery artifacts; JSON is the local editable source
 for contact state.
-Contact columns are `套磁情况`, `套磁时间`, `回复情况`, and `回复情况备注`.
+Contact columns are `套磁情况`, `套磁时间`, `回复情况`, `约面试时间`, and
+`回复情况备注`.
 Valid contact statuses are `已套磁`, `先不考虑`, `不可能`, and `不匹配`.
 
 ## Evidence Rules

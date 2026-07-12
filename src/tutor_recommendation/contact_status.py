@@ -13,9 +13,10 @@ from .teacher_identity import TEACHER_ID_COLUMN, teacher_record_key
 STATUS_COLUMN = "套磁情况"
 CONTACT_DATE_COLUMN = "套磁时间"
 CONTACT_RESPONSE_COLUMN = "回复情况"
+INTERVIEW_TIME_COLUMN = "约面试时间"
 CONTACT_NOTE_COLUMN = "回复情况备注"
 LEGACY_CONTACT_NOTE_COLUMNS = ["套磁备注"]
-CONTACT_COLUMNS = [STATUS_COLUMN, CONTACT_DATE_COLUMN, CONTACT_RESPONSE_COLUMN, CONTACT_NOTE_COLUMN]
+CONTACT_COLUMNS = [STATUS_COLUMN, CONTACT_DATE_COLUMN, CONTACT_RESPONSE_COLUMN, INTERVIEW_TIME_COLUMN, CONTACT_NOTE_COLUMN]
 VALID_CONTACT_STATUSES = ["已套磁", "先不考虑", "不可能", "不匹配"]
 LEGACY_STATUS_ALIASES = {"不考虑": "先不考虑"}
 DEFAULT_CONTACT_RESPONSES = ["已发", "官回", "添加微信", "约面试", "考核", "已满"]
@@ -53,7 +54,7 @@ def legacy_row_key(school_slug: str, college_slug: str, row: Any) -> str:
 
 def empty_store() -> dict[str, Any]:
     return {
-        "version": 3,
+        "version": 4,
         "updated_at": "",
         "statuses": {},
     }
@@ -64,9 +65,9 @@ def normalize_status_store(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         return store
     try:
-        store["version"] = max(int(data.get("version") or 1), 3)
+        store["version"] = max(int(data.get("version") or 1), 4)
     except (TypeError, ValueError):
-        store["version"] = 3
+        store["version"] = 4
     store["updated_at"] = norm_text(data.get("updated_at") or data.get("updatedAt"))
     statuses = data.get("statuses") or data.get("records") or {}
     if not isinstance(statuses, dict):
@@ -126,6 +127,18 @@ def split_known_and_custom_responses(value: Any) -> tuple[list[str], list[str]]:
     return known, custom
 
 
+def normalize_interview_at(value: Any) -> str:
+    text = norm_text(value).replace(" ", "T")
+    if len(text) < 16:
+        return ""
+    candidate = text[:16]
+    try:
+        datetime.fromisoformat(candidate)
+    except ValueError:
+        return ""
+    return candidate
+
+
 def normalize_contact_entry(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         status = normalize_status(value)
@@ -146,6 +159,11 @@ def normalize_contact_entry(value: Any) -> dict[str, Any]:
         or value.get("replyStatuses")
         or value.get(CONTACT_RESPONSE_COLUMN)
     )
+    interview_at = normalize_interview_at(
+        value.get("interview_at")
+        or value.get("interviewAt")
+        or value.get(INTERVIEW_TIME_COLUMN)
+    )
     note = unique_join_text(
         [
             value.get("note"),
@@ -163,6 +181,8 @@ def normalize_contact_entry(value: Any) -> dict[str, Any]:
         entry["contacted_at"] = contacted_at
     if responses:
         entry["responses"] = responses
+    if interview_at:
+        entry["interview_at"] = interview_at
     if note:
         entry["note"] = note
     for field in ["name", "school", "college", "teacher_url", "updated_at"]:
@@ -253,6 +273,7 @@ def contact_entry_from_row(row: Any) -> dict[str, Any]:
     status = normalize_status(getter(STATUS_COLUMN, ""))
     contacted_at = norm_text(getter(CONTACT_DATE_COLUMN, ""))
     responses, custom_responses = split_known_and_custom_responses(getter(CONTACT_RESPONSE_COLUMN, ""))
+    interview_at = normalize_interview_at(getter(INTERVIEW_TIME_COLUMN, ""))
     note = unique_join_text(
         [
             getter(CONTACT_NOTE_COLUMN, ""),
@@ -266,6 +287,8 @@ def contact_entry_from_row(row: Any) -> dict[str, Any]:
         entry["contacted_at"] = contacted_at
     if responses:
         entry["responses"] = responses
+    if interview_at:
+        entry["interview_at"] = interview_at
     if note:
         entry["note"] = note
     return entry
@@ -340,6 +363,7 @@ def apply_contact_statuses(
         values[STATUS_COLUMN].append(normalize_status(entry.get("status")))
         values[CONTACT_DATE_COLUMN].append(norm_text(entry.get("contacted_at")))
         values[CONTACT_RESPONSE_COLUMN].append(join_responses(entry.get("responses", [])))
+        values[INTERVIEW_TIME_COLUMN].append(normalize_interview_at(entry.get("interview_at")))
         values[CONTACT_NOTE_COLUMN].append(norm_text(entry.get("note")))
     for column, column_values in values.items():
         df[column] = column_values

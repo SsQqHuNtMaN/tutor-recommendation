@@ -38,7 +38,7 @@ if not defined PYTHON_BIN (
 
 echo Using Python: %PYTHON_BIN%
 
-"%PYTHON_BIN%" -c "import json,sys,urllib.request; base=sys.argv[1].rstrip('/'); health=json.load(urllib.request.urlopen(base + '/api/health', timeout=0.5)); session=json.load(urllib.request.urlopen(base + '/api/session', timeout=0.5)); raise SystemExit(0 if health.get('apiVersion') == 2 and session.get('token') else 1)" "%URL%" >nul 2>nul
+"%PYTHON_BIN%" -c "import json,sys,urllib.request; base=sys.argv[1].rstrip('/'); health=json.load(urllib.request.urlopen(base + '/api/health', timeout=0.5)); session=json.load(urllib.request.urlopen(base + '/api/session', timeout=0.5)); raise SystemExit(0 if health.get('apiVersion') == 4 and session.get('token') else 1)" "%URL%" >nul 2>nul
 if not errorlevel 1 (
   echo Teacher viewer is already running: %URL%
   if "%VIEWER_NO_BROWSER%" neq "1" start "" "%URL%"

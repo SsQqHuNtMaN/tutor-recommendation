@@ -11,7 +11,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
 
@@ -23,11 +23,9 @@ from .contact_status import (
     has_status_entry,
     load_status_store,
     normalize_contact_entry,
-    normalize_status_store,
     save_status_store,
     row_key as contact_row_key,
 )
-from .migrate_contact_status_column import migrate_workbook
 from .teacher_match_targets import TARGETS, TargetConfig
 
 
@@ -38,9 +36,13 @@ STATUS_STORE_PATH = (PROJECT_ROOT / CONTACT_STATUS_PATH).resolve()
 STATUS_LOCK = Lock()
 DATA_CACHE_LOCK = Lock()
 DATA_CACHE: dict[str, Any] = {"signature": None, "payload": None}
+DETAIL_CACHE_LOCK = Lock()
+DETAIL_CACHE: dict[str, dict[str, Any]] = {}
 CSRF_TOKEN = secrets.token_urlsafe(32)
-VIEWER_API_VERSION = 2
+VIEWER_API_VERSION = 4
 MAX_JSON_BYTES = 2 * 1024 * 1024
+SUMMARY_CACHE_VERSION = 1
+SUMMARY_CACHE_PATH = OUTPUTS_DIR / ".viewer_summary_cache.json"
 FINAL_SHEET = "全量教师名录"
 DETAIL_SHEETS = {
     "dblp": ["DBLP近三年明细", "DBLP近三年论文明细"],
@@ -155,46 +157,7 @@ def store_contact_entry_for_row(store: dict[str, Any], target: TargetConfig, raw
     return candidates[0] if len(candidates) == 1 else {}
 
 
-def build_records() -> list[dict[str, Any]]:
-    store = load_status_store(STATUS_STORE_PATH)
-    records: list[dict[str, Any]] = []
-    for key in TARGETS:
-        target = TARGETS[key]
-        final_path = PROJECT_ROOT / target.final_path
-        if not final_path.exists():
-            continue
-        rows = read_sheet(final_path, FINAL_SHEET)
-        details = read_detail_groups(final_path)
-        detail_indexes = {name: detail_index(items) for name, items in details.items()}
-        for raw in rows:
-            row_key = record_key(target, raw)
-            contact = normalize_contact_entry(raw)
-            stored_contact = store_contact_entry_for_row(store, target, raw, row_key)
-            if stored_contact:
-                contact = {**contact, **stored_contact}
-            status = norm_text(contact.get("status") or raw.get(STATUS_COLUMN))
-            raw[STATUS_COLUMN] = status
-            records.append(
-                {
-                    "schoolSlug": target.school_slug,
-                    "collegeSlug": target.college_slug,
-                    "schoolName": target.school_name,
-                    "collegeName": target.college_name,
-                    "sourcePath": str(target.final_path),
-                    "raw": raw,
-                    "dblp": matching_details(detail_indexes["dblp"], raw),
-                    "arxiv": matching_details(detail_indexes["arxiv"], raw),
-                    "web": matching_details(detail_indexes["web"], raw),
-                    "webSearch": matching_details(detail_indexes["webSearch"], raw),
-                    "contact": contact,
-                    "status": status,
-                    "key": row_key,
-                }
-            )
-    return records
-
-
-def source_signature() -> tuple[tuple[str, str, Any, Any], ...]:
+def workbook_signature() -> tuple[tuple[str, str, Any, Any], ...]:
     signature: list[tuple[str, str, Any, Any]] = []
     for key in TARGETS:
         target = TARGETS[key]
@@ -205,6 +168,106 @@ def source_signature() -> tuple[tuple[str, str, Any, Any], ...]:
             signature.append((key, str(target.final_path), None, None))
             continue
         signature.append((key, str(target.final_path), stat.st_mtime_ns, stat.st_size))
+    return tuple(signature)
+
+
+def build_base_records() -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for key in TARGETS:
+        target = TARGETS[key]
+        final_path = PROJECT_ROOT / target.final_path
+        if not final_path.exists():
+            continue
+        rows = read_sheet(final_path, FINAL_SHEET)
+        for raw in rows:
+            row_key = record_key(target, raw)
+            records.append(
+                {
+                    "_targetKey": key,
+                    "schoolSlug": target.school_slug,
+                    "collegeSlug": target.college_slug,
+                    "schoolName": target.school_name,
+                    "collegeName": target.college_name,
+                    "sourcePath": str(target.final_path),
+                    "raw": raw,
+                    "key": row_key,
+                }
+            )
+    return records
+
+
+def load_summary_cache(signature: tuple[tuple[str, str, Any, Any], ...]) -> list[dict[str, Any]] | None:
+    try:
+        payload = json.loads(SUMMARY_CACHE_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    if payload.get("version") != SUMMARY_CACHE_VERSION:
+        return None
+    if payload.get("signature") != [list(item) for item in signature]:
+        return None
+    records = payload.get("records")
+    return records if isinstance(records, list) else None
+
+
+def save_summary_cache(signature: tuple[tuple[str, str, Any, Any], ...], records: list[dict[str, Any]]) -> None:
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": SUMMARY_CACHE_VERSION,
+        "signature": [list(item) for item in signature],
+        "records": records,
+    }
+    temp_path = SUMMARY_CACHE_PATH.with_suffix(".tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    temp_path.replace(SUMMARY_CACHE_PATH)
+
+
+def base_records() -> list[dict[str, Any]]:
+    signature = workbook_signature()
+    cached = load_summary_cache(signature)
+    if cached is not None:
+        return cached
+    records = build_base_records()
+    try:
+        save_summary_cache(signature, records)
+    except OSError:
+        pass
+    return records
+
+
+def build_records() -> list[dict[str, Any]]:
+    store = load_status_store(STATUS_STORE_PATH)
+    records: list[dict[str, Any]] = []
+    for base in base_records():
+        target_name = norm_text(base.get("_targetKey"))
+        target = TARGETS.get(target_name)
+        if target is None:
+            continue
+        raw = dict(base.get("raw") or {})
+        row_key = norm_text(base.get("key")) or record_key(target, raw)
+        contact = normalize_contact_entry(raw)
+        stored_contact = store_contact_entry_for_row(store, target, raw, row_key)
+        if stored_contact:
+            contact = {**contact, **stored_contact}
+        status = norm_text(contact.get("status") or raw.get(STATUS_COLUMN))
+        raw[STATUS_COLUMN] = status
+        records.append(
+            {
+                "schoolSlug": base.get("schoolSlug", ""),
+                "collegeSlug": base.get("collegeSlug", ""),
+                "schoolName": base.get("schoolName", ""),
+                "collegeName": base.get("collegeName", ""),
+                "sourcePath": base.get("sourcePath", ""),
+                "raw": raw,
+                "contact": contact,
+                "status": status,
+                "key": row_key,
+            }
+        )
+    return records
+
+
+def source_signature() -> tuple[tuple[str, str, Any, Any], ...]:
+    signature = list(workbook_signature())
     try:
         status_stat = STATUS_STORE_PATH.stat()
     except FileNotFoundError:
@@ -212,6 +275,39 @@ def source_signature() -> tuple[tuple[str, str, Any, Any], ...]:
     else:
         signature.append(("contact_status", str(CONTACT_STATUS_PATH), status_stat.st_mtime_ns, status_stat.st_size))
     return tuple(signature)
+
+
+def detail_indexes_for_path(path: Path) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    stat = path.stat()
+    signature = (stat.st_mtime_ns, stat.st_size)
+    cache_key = str(path.resolve())
+    with DETAIL_CACHE_LOCK:
+        cached = DETAIL_CACHE.get(cache_key)
+        if cached and cached.get("signature") == signature:
+            return cached["indexes"]
+        groups = read_detail_groups(path)
+        indexes = {name: detail_index(items) for name, items in groups.items()}
+        DETAIL_CACHE[cache_key] = {"signature": signature, "indexes": indexes}
+        return indexes
+
+
+def detail_payload(row_key: str) -> dict[str, Any] | None:
+    record = next((item for item in data_payload()["records"] if item.get("key") == row_key), None)
+    if record is None:
+        return None
+    source_path = Path(norm_text(record.get("sourcePath")))
+    path = source_path if source_path.is_absolute() else PROJECT_ROOT / source_path
+    if not path.is_file():
+        return None
+    indexes = detail_indexes_for_path(path)
+    raw = record.get("raw") or {}
+    return {
+        "key": row_key,
+        "dblp": matching_details(indexes["dblp"], raw),
+        "arxiv": matching_details(indexes["arxiv"], raw),
+        "web": matching_details(indexes["web"], raw),
+        "webSearch": matching_details(indexes["webSearch"], raw),
+    }
 
 
 def data_payload() -> dict[str, Any]:
@@ -247,50 +343,6 @@ def save_contact_entry(key: str, entry: dict[str, Any]) -> dict[str, Any]:
         return status_store_for_response()
 
 
-def save_full_status_store(store: dict[str, Any]) -> dict[str, Any]:
-    with STATUS_LOCK:
-        normalized = normalize_status_store(store)
-        save_status_store(normalized, STATUS_STORE_PATH)
-        return status_store_for_response()
-
-
-def iter_current_workbooks() -> list[Path]:
-    if not OUTPUTS_DIR.exists():
-        return []
-    paths: list[Path] = []
-    for path in OUTPUTS_DIR.rglob("*.xlsx"):
-        if "archive" in path.relative_to(PROJECT_ROOT).parts:
-            continue
-        paths.append(path)
-    return sorted(paths)
-
-
-def sync_status_to_workbooks(preserve_untracked: bool = False) -> dict[str, Any]:
-    store = status_store_for_response()
-    save_status_store(store, STATUS_STORE_PATH)
-    synced: list[str] = []
-    unchanged: list[str] = []
-    errors: list[dict[str, str]] = []
-    for path in iter_current_workbooks():
-        try:
-            changed = migrate_workbook(path, store, authoritative=not preserve_untracked)
-        except Exception as exc:  # noqa: BLE001
-            errors.append({"path": str(path.relative_to(PROJECT_ROOT)), "error": str(exc)})
-            continue
-        relative = str(path.relative_to(PROJECT_ROOT))
-        if changed:
-            synced.append(relative)
-        else:
-            unchanged.append(relative)
-    return {
-        "ok": not errors,
-        "synced": synced,
-        "unchanged": unchanged,
-        "errors": errors,
-        "workbooks": len(synced) + len(unchanged) + len(errors),
-    }
-
-
 class ViewerHandler(SimpleHTTPRequestHandler):
     server_version = "TeacherViewer/1.0"
 
@@ -304,6 +356,14 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/data":
             self.write_json(data_payload())
+            return
+        if parsed.path == "/api/detail":
+            row_key = norm_text(parse_qs(parsed.query).get("key", [""])[0])
+            details = detail_payload(row_key) if row_key else None
+            if details is None:
+                self.write_json({"error": "teacher detail not found"}, HTTPStatus.NOT_FOUND)
+            else:
+                self.write_json(details)
             return
         self.serve_static(parsed.path)
 
@@ -346,17 +406,6 @@ class ViewerHandler(SimpleHTTPRequestHandler):
                 return
             store = save_contact_entry(key, entry)
             self.write_json({"ok": True, "statusStore": store})
-            return
-        if parsed.path == "/api/status-store":
-            store = payload.get("statusStore") or payload
-            if not isinstance(store, dict):
-                self.write_json({"error": "statusStore object is required"}, HTTPStatus.BAD_REQUEST)
-                return
-            self.write_json({"ok": True, "statusStore": save_full_status_store(store)})
-            return
-        if parsed.path == "/api/sync-excel":
-            result = sync_status_to_workbooks(bool(payload.get("preserveUntracked")))
-            self.write_json(result, HTTPStatus.OK if result["ok"] else HTTPStatus.INTERNAL_SERVER_ERROR)
             return
         self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
