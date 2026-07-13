@@ -8,7 +8,7 @@
 
 ```powershell
 $env:PYTHONIOENCODING='utf-8'
-python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 PDF 文本抽取：
@@ -22,12 +22,19 @@ PDF 文本抽取：
 python -c "import pandas, openpyxl, requests, bs4, pypinyin, fitz; print('ok')"
 ```
 
-## 2. 本地学生画像
+## 2. Agent 私人资料与学生画像
 
-公开仓库只提供占位模板。真实简历、申请表和画像放在 `data/private/`：
+用户把真实简历、申请表和个人说明放在 `user_private/source/`。Coding Agent 使用内部工具建立工作区并抽取草稿：
 
 ```powershell
-Copy-Item data/templates/student_profile.example.json data/private/student_profile.json
+tutor setup
+tutor profile extract
+```
+
+草稿位于 `user_private/profile/student_profile.draft.json`，带有确认阻断标记。Agent 必须让用户确认背景摘要、关键词权重、同义概念组、院所加分和强信号词，再保存为 `user_private/profile/student_profile.json` 并运行：
+
+```powershell
+tutor profile validate
 ```
 
 也可以用环境变量指定其他画像：
@@ -36,11 +43,11 @@ Copy-Item data/templates/student_profile.example.json data/private/student_profi
 $env:STUDENT_PROFILE_PATH='D:\path\to\student_profile.json'
 ```
 
-各主命令也支持：
+统一入口也支持：
 
 ```powershell
-python build_teacher_match.py <target> --profile 'D:\path\to\student_profile.json'
-python build_teacher_match.py <target> --demo-profile
+tutor run <target> --profile 'D:\path\to\student_profile.json'
+tutor run <target> --demo-profile
 ```
 
 `--profile` 和 `--demo-profile` 互斥。正式运行缺少或无法验证私有画像时会立即失败，不会自动使用公开模板。画像文件控制匹配方向、关键词权重、同义概念组、院所加分和强信号词。不要把真实画像提交到 Git。
@@ -56,29 +63,26 @@ src/tutor_recommendation/teacher_match_targets.py
 查看可用目标：
 
 ```powershell
-python build_teacher_match.py --help
+tutor targets
+tutor targets --check <target>
 ```
 
-新增学校或学院时，先注册目标键，再在第一阶段解析器中实现目录和主页抽取逻辑。
+目标不存在时，Coding Agent 应按 [Agent 工作流](agent-workflow.md) 查找官方目录、注册 target、实现或复用 collector、绑定 registry 并补测试，而不是让用户自行改代码。
 
 ## 4. 三阶段流程
 
-第一阶段：抓取教师目录和主页，生成初步推荐。
+Agent 的常规入口会依次运行目录/主页、DBLP、arXiv/网页三个阶段：
 
 ```powershell
-python build_teacher_match.py <target>
+tutor run <target>
 ```
 
-第二阶段：补充 DBLP 近三年论文证据。
+兼容包装器位于 `scripts/legacy/`，只用于高级参数和排障：
 
 ```powershell
-python update_teacher_match_with_dblp.py <target>
-```
-
-第三阶段：补充 arXiv 和已知网页证据，生成最终工作簿。
-
-```powershell
-python complete_teacher_research.py <target>
+python scripts/legacy/build_teacher_match.py <target>
+python scripts/legacy/update_teacher_match_with_dblp.py <target>
+python scripts/legacy/complete_teacher_research.py <target>
 ```
 
 常见输出：
@@ -89,19 +93,13 @@ outputs/<school_slug>/<college_slug>/<school_slug>_<college_slug>_teacher_match_
 outputs/<school_slug>/<college_slug>/<school_slug>_<college_slug>_teacher_match_full_research.xlsx
 ```
 
-批量跑第一阶段：
-
-```powershell
-python build_teacher_match.py --all
-```
-
 如果同一学校有多个重叠学院或多院导师库，应把这些目标放在同一条第一阶段命令里运行，这样会启用跨目标去重：
 
 ```powershell
-python build_teacher_match.py zju_ai zju_cs zju_uiuc zju_cse
-python build_teacher_match.py fudan_ciram fudan_ai
-python build_teacher_match.py nju_cs nju_ai nju_is
-python build_teacher_match.py seu_cse seu_software seu_ai
+tutor run zju_ai zju_cs zju_uiuc zju_cse
+tutor run fudan_ciram fudan_ai
+tutor run nju_cs nju_ai nju_is
+tutor run seu_cse seu_software seu_ai
 ```
 
 跨目标去重只使用个人主页/教师主页强身份键。同校同名但没有共享正身份信号时保留两行并标记人工复核；目录页、登录页、实验室首页和带 `#姓名` 的列表锚点不会被当作个人身份键。显式配置为同一 `cross_target_overlap_group` 的目标例外：如果官方证据表明导师确实属于多个学院，则保留相同稳定教师 ID 的多条学院成员关系，而不是删除其中一条。
@@ -109,7 +107,7 @@ python build_teacher_match.py seu_cse seu_software seu_ai
 东南大学三学院归属的本地人工复核文件为：
 
 ```text
-data/private/seu_college_affiliations.json
+user_private/overrides/seu_college_affiliations.json
 ```
 
 可从 `data/templates/seu_college_affiliations.example.json` 复制。学院归属只能来自官方导师名单、招生材料、教师主页或人工确认记录，不得按研究方向猜测；证据不足时保留为待复核。
@@ -122,22 +120,22 @@ data/private/seu_college_affiliations.json
 $env:SCHOOL_SLUG='<school_slug>'
 $env:COLLEGE_SLUG='<college_slug>'
 $env:AFFILIATION_KEYWORDS='<school affiliation keywords>'
-python update_teacher_match_with_dblp.py
+python scripts/legacy/update_teacher_match_with_dblp.py
 ```
 
 大名单目标可限制 DBLP 查询范围：
 
 ```powershell
-python update_teacher_match_with_dblp.py <target> --recommendation-levels 强烈建议
+python scripts/legacy/update_teacher_match_with_dblp.py <target> --recommendation-levels 强烈建议
 ```
 
 人工 DBLP 消歧不要写进源码。复制模板到本地私有目录：
 
 ```powershell
-Copy-Item data/templates/dblp_overrides.example.json data/private/dblp_overrides.json
+Copy-Item data/templates/dblp_overrides.example.json user_private/overrides/dblp_overrides.json
 ```
 
-脚本默认读取 `data/private/dblp_overrides.json`，也可设置：
+脚本优先读取 `user_private/overrides/dblp_overrides.json`，并兼容旧 `data/private/` 路径；也可设置：
 
 ```powershell
 $env:DBLP_OVERRIDES_PATH='D:\path\to\dblp_overrides.json'
@@ -154,13 +152,13 @@ outputs/<school_slug>/<college_slug>/full_research_checkpoint.jsonl
 中断后直接重跑同一命令即可。只想用现有 checkpoint 重新汇总最终 Excel，不发起新网络请求：
 
 ```powershell
-python complete_teacher_research.py <target> --finalize-only
+python scripts/legacy/complete_teacher_research.py <target> --finalize-only
 ```
 
 `--finalize-only` 默认要求当前输入的每一行都有有效 checkpoint。先检查：
 
 ```powershell
-python checkpoint_doctor.py <target>
+tutor doctor <target>
 ```
 
 只有明确接受未覆盖行缺少深检索证据时才使用 `--allow-partial`。如果第一阶段、DBLP 表、学生画像、评分规则、年份窗口或关键教师字段变化，不要只用 finalize-only；正常重跑第三阶段会忽略 stale checkpoint 并重新补查对应行。
@@ -172,22 +170,22 @@ python checkpoint_doctor.py <target>
 对低证据候选做 bounded web search：
 
 ```powershell
-python supplement_web_search_research.py <target>
+python scripts/legacy/supplement_web_search_research.py <target>
 ```
 
 只用已整理或缓存证据重写最终表：
 
 ```powershell
-python supplement_web_search_research.py <target> --max-candidates 0
+python scripts/legacy/supplement_web_search_research.py <target> --max-candidates 0
 ```
 
 人工审核过的搜索证据可放入本地私有 JSON：
 
 ```powershell
-Copy-Item data/templates/web_search_curated.example.json data/private/web_search_curated.json
+Copy-Item data/templates/web_search_curated.example.json user_private/overrides/web_search_curated.json
 ```
 
-脚本默认读取 `data/private/web_search_curated.json`，也可设置：
+脚本优先读取 `user_private/overrides/web_search_curated.json`，并兼容旧 `data/private/` 路径；也可设置：
 
 ```powershell
 $env:CURATED_WEB_SEARCH_PATH='D:\path\to\web_search_curated.json'
@@ -200,19 +198,21 @@ $env:CURATED_WEB_SEARCH_PATH='D:\path\to\web_search_curated.json'
 推荐入口：
 
 ```powershell
-.\start_viewer.bat
+tutor view
 ```
+
+Windows 一键入口是仓库根目录的 `start_viewer.bat`，可以直接双击。启动器会复用已运行的当前 Viewer；默认端口被旧版 Viewer 或其他程序占用时，会自动选择后续空闲端口并打开正确地址，不会关闭旧进程或删除联系状态。
 
 或在 Git Bash / macOS / Linux 下：
 
 ```bash
-./start_viewer.sh
+./scripts/start_viewer.sh
 ```
 
 手动启动：
 
 ```powershell
-python viewer_server.py --port 8765
+python tutor.py view --port 8765
 ```
 
 打开：
@@ -231,7 +231,7 @@ outputs/contact_status.json
 
 “查看已套磁”只显示 `套磁情况=已套磁` 的教师。“隐藏已标记”会隐藏所有非空状态，包括 `已套磁`、`先不考虑`、`不可能` 和 `不匹配`；同时启用两个相反筛选时结果为空。
 
-“套磁日历”固定在教师列表筛选与工作区上方，并有独立的学校、学院筛选和重置入口；搜索、推荐等级、套磁情况、“查看已套磁”和“隐藏已标记”等列表选项不会改变日历。日历以连续四周、每周一行的条带展示，星期一至星期日是固定列头，四行按本周、上周、下周等相对名称显示。每个日期只显示 `已发`、`官回`、`添加微信`、`约面试`、`考核`、`已满` 或 `未记录` 的颜色和数量；顶部图例汇总当前四周数量。点击日期后，下方列出当天教师、学校、学院、完整回复链和具体面试时间，点击教师继续打开详情。可用“上一周、本周、下一周”导航，每次移动一周。详情中勾选“约面试”后会出现精确到分钟的时间输入；日历用菱形标记已确定时间的面试。缺少 `套磁时间` 的已套磁记录保留在默认折叠列表中。日历开合三角位于标题行内；详情栏使用带顶部三角的内嵌窄控制列，二者均不向内容区凸出。顶部不再提供刷新、保存、同步、下载或导出按钮，联系编辑通过本地 API 自动保存，需要同步 Excel 时运行 `python sync_contact_status_to_workbooks.py`。
+“套磁日历”固定在教师列表筛选与工作区上方，并有独立的学校、学院筛选和重置入口；搜索、推荐等级、套磁情况、“查看已套磁”和“隐藏已标记”等列表选项不会改变日历。日历以连续四周、每周一行的条带展示，星期一至星期日是固定列头，四行按本周、上周、下周等相对名称显示。每个日期只显示 `已发`、`官回`、`添加微信`、`约面试`、`考核`、`已满` 或 `未记录` 的颜色和数量；顶部图例汇总当前四周数量。点击日期后，下方列出当天教师、学校、学院、完整回复链和具体面试时间，点击教师继续打开详情。可用“上一周、本周、下一周”导航，每次移动一周。详情中勾选“约面试”后会出现精确到分钟的时间输入；日历用菱形标记已确定时间的面试。缺少 `套磁时间` 的已套磁记录保留在默认折叠列表中。日历开合三角位于标题行内；详情栏使用带顶部三角的内嵌窄控制列，二者均不向内容区凸出。顶部不再提供刷新、保存、同步、下载或导出按钮，联系编辑通过本地 API 自动保存，需要同步 Excel 时由 Agent 运行 `python scripts/legacy/sync_contact_status_to_workbooks.py`。
 
 教师列表的“重置筛选”会显示当前活动条件数量；无匹配结果时表格提供清除入口。教师行可用 Tab 聚焦，并通过 Enter 或 Space 打开详情。日历重置只清除日历学校和学院，不改变教师列表条件。浏览器会恢复学校、学院、推荐等级、套磁状态和复选条件等非敏感筛选偏好，但不会保存搜索词、教师 ID 或联系内容。
 
@@ -248,7 +248,7 @@ outputs/contact_status.json
 需要同步回 Excel：
 
 ```powershell
-python sync_contact_status_to_workbooks.py
+python scripts/legacy/sync_contact_status_to_workbooks.py
 ```
 
 `outputs/contact_status.json` 是本地编辑状态源；Excel 更适合查看、审计和交付。
@@ -284,7 +284,7 @@ python sync_contact_status_to_workbooks.py
 $env:PYTHONPATH=(Join-Path (Get-Location) 'src')
 python -m unittest discover -s tests -v
 python -m compileall -q .
-python result_quality_audit.py --fail-on-violations
+tutor audit --fail-on-violations
 ```
 
 质量审计只读取最终工作簿并用当前 policy 影子评分，不会改写 Excel。每个阶段的新运行还会更新学院目录下的 `run_manifest.json`。

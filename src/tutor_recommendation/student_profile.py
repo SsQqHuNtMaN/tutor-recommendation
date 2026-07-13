@@ -9,14 +9,15 @@ from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PRIVATE_PROFILE = PROJECT_ROOT / "data/private/student_profile.json"
+DEFAULT_PRIVATE_PROFILE = PROJECT_ROOT / "user_private/profile/student_profile.json"
+LEGACY_PRIVATE_PROFILE = PROJECT_ROOT / "data/private/student_profile.json"
 DEFAULT_TEMPLATE_PROFILE = PROJECT_ROOT / "data/templates/student_profile.example.json"
 ALLOW_TEMPLATE_ENV = "TUTOR_ALLOW_TEMPLATE_PROFILE"
 
 
 DEFAULT_PROFILE: dict[str, Any] = {
     "resume_match_context": (
-        "通用示例画像：请在 data/private/student_profile.json 中替换为申请者真实背景、"
+        "通用示例画像：请在 user_private/profile/student_profile.json 中替换为申请者真实背景、"
         "目标方向、关键词权重和强信号词；公开仓库不内置任何个人简历画像。"
     ),
     "keyword_weights": [
@@ -112,7 +113,7 @@ def _load_profile_data(
             raise ProfileConfigurationError(f"student profile root must be a JSON object: {DEFAULT_TEMPLATE_PROFILE}")
         return data, DEFAULT_TEMPLATE_PROFILE, True
 
-    path = DEFAULT_PRIVATE_PROFILE
+    path = DEFAULT_PRIVATE_PROFILE if DEFAULT_PRIVATE_PROFILE.is_file() else LEGACY_PRIVATE_PROFILE
     if path.is_file():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -124,7 +125,8 @@ def _load_profile_data(
 
     raise ProfileConfigurationError(
         "private student profile is required for a formal run; "
-        f"not found at {DEFAULT_PRIVATE_PROFILE}. Prepare data/private/student_profile.json or use --demo-profile explicitly."
+        f"not found at {DEFAULT_PRIVATE_PROFILE}. Ask the Coding Agent to prepare user_private/profile/student_profile.json "
+        f"(legacy path: {LEGACY_PRIVATE_PROFILE}) or use --demo-profile explicitly."
     )
 
 
@@ -134,6 +136,8 @@ def load_student_profile(
 ) -> StudentProfile:
     raw_data, source_path, is_demo = _load_profile_data(profile_path, allow_template)
     data = raw_data
+    if data.get("_draft_requires_confirmation"):
+        raise ProfileConfigurationError("student profile is still a draft and requires user confirmation")
     resume_context = str(data.get("resume_match_context") or "").strip()
     if not resume_context:
         raise ProfileConfigurationError("resume_match_context must not be empty")

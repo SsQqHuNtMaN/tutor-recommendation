@@ -1,5 +1,5 @@
 {
-  "_note": "Copy this file to data/private/seu_college_affiliations.json only for manually verified SEU college affiliations. Teacher-level evidence is private and must not be committed.",
+  "_note": "Copy this file to user_private/overrides/seu_college_affiliations.json only for manually verified SEU college affiliations. Teacher-level evidence is private and must not be committed.",
   "entries": [
     {
       "name": "Teacher Name",

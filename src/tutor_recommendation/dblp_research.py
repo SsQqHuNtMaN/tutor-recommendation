@@ -30,6 +30,7 @@ from .ranking_policy import (
 from .teacher_identity import TEACHER_ID_COLUMN, ensure_teacher_identity, teacher_record_key
 from .cache_utils import configured_max_age_days, read_cached_text
 from .run_manifest import context_source_rows, create_run_context, recent_years, write_stage_manifest
+from .private_paths import private_file
 
 
 SCHOOL_SLUG = os.environ.get("SCHOOL_SLUG", "sjtu")
@@ -87,7 +88,7 @@ def compile_relevant_pattern() -> re.Pattern[str]:
 
 
 RELEVANT_PATTERN = compile_relevant_pattern()
-DBLP_OVERRIDES_PATH = Path(os.environ.get("DBLP_OVERRIDES_PATH", "data/private/dblp_overrides.json"))
+DBLP_OVERRIDES_PATH = private_file("dblp_overrides.json", env_name="DBLP_OVERRIDES_PATH")
 
 
 def load_dblp_overrides(

@@ -1,9 +1,11 @@
-# Private Input Data
+# Legacy Private Input Data
 
-Put your own resume, application materials, and optional local profile here.
+New Agent-first work should use `user_private/`. This directory remains readable
+for compatibility with existing local profiles and overrides.
 
-The matching code reads `data/private/student_profile.json` by default. You can
-also point to another profile with:
+The matching code first reads `user_private/profile/student_profile.json`, then
+falls back to `data/private/student_profile.json`. You can also point to another
+profile with:
 
 ```powershell
 $env:STUDENT_PROFILE_PATH='D:\path\to\student_profile.json'

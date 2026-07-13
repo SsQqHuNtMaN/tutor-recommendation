@@ -29,8 +29,9 @@
 实现位于：
 
 - `viewer/index.html`：固定的日历区、`.workbench`、教师列表和详情栏。
-- `viewer/assets/app.js`：独立筛选、选择联动、侧栏状态、渐进表格和日历渲染。
-- `viewer/assets/app.css`：桌面双列、窄屏内部滚动、面试标记和折叠样式。
+- `viewer/assets/core.js`：日期、联系状态、转义和日历状态等无状态工具。
+- `viewer/assets/app.js`：API、共享状态、独立筛选、选择联动、渐进表格、日历和详情渲染。
+- `viewer/assets/base.css`：设计变量和基础控件；`app.css`：布局、日历、表格、详情和响应式规则。
 
 ## 统一状态与渲染
 

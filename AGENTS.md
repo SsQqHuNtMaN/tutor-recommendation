@@ -8,8 +8,9 @@ engineering rules, commands, and privacy boundaries only.
 - Do not store personal resumes, application forms, student profiles, contact
   status, generated Excel files, caches, or current crawl results in tracked
   files.
-- Local private context may live in `docs/private/` and `data/private/`; both
-  are ignored by Git except `data/private/README.md`.
+- User-provided materials and the confirmed profile live under `user_private/`;
+  only its README and example request are tracked. `data/private/` remains a
+  legacy-compatible private path. Local agent context lives in `docs/private/`.
 - If a task depends on current local research state, first check whether
   `docs/private/project-context.local.md` exists and read it locally. Never copy
   its contents into public docs.
@@ -39,17 +40,40 @@ directory into auditable teacher recommendation workbooks:
 - keep recommendation reasons and evidence sources reviewable,
 - track manual contact status locally through the viewer.
 
+## Agent-First Workflow
+
+- The user supplies private materials, target school/college, preferences, and
+  confirmation of uncertain profile fields. The Coding Agent performs the
+  commands, target integration, evidence workflow, checks, and Viewer launch.
+- Start by reading `user_private/request.md` when it exists and inspecting
+  `user_private/source/`. Never commit either path's private contents.
+- Generate only a draft profile from source materials. A user-confirmed
+  `user_private/profile/student_profile.json` is required for formal runs.
+- Check every requested target with `tutor targets --check <target>`. If it is
+  missing, follow `docs/agent-workflow.md`: find an official directory, add the
+  target and collector binding, add tests, then run the workflow. Do not ask the
+  user to implement project code.
+
 ## Key Files
 
 - `README.md`: public project overview and quick start.
+- `docs/agent-workflow.md`: authoritative Agent intake, missing-target, run,
+  and validation workflow.
+- `user_private/README.md`: safe public instructions for the ignored private
+  materials workspace.
+- `src/tutor_recommendation/cli.py`: unified deterministic tools used by the
+  Coding Agent; root scripts remain compatibility wrappers.
+- `src/tutor_recommendation/collectors/registry.py`: explicit target-to-collector
+  binding; every registered target must have an implementation.
 - `requirements.txt`: core runtime dependencies.
 - `data/templates/student_profile.example.json`: public placeholder profile.
 - `data/templates/dblp_overrides.example.json`: public DBLP override format.
 - `data/templates/web_search_curated.example.json`: public curated search format.
 - `data/templates/seu_college_affiliations.example.json`: public SEU
   multi-college affiliation override format.
-- `src/tutor_recommendation/student_profile.py`: loads local profile data from
-  `data/private/student_profile.json` or `STUDENT_PROFILE_PATH`.
+- `src/tutor_recommendation/student_profile.py`: loads the confirmed profile
+  from `user_private/profile/student_profile.json`, the legacy private path, or
+  `STUDENT_PROFILE_PATH`.
 - `src/tutor_recommendation/ranking_policy.py`: unified scoring, anchor, and
   recommendation policy used by every research stage.
 - `src/tutor_recommendation/teacher_identity.py`: stable teacher IDs and
@@ -76,44 +100,45 @@ directory into auditable teacher recommendation workbooks:
 
 ## Common Commands
 
-From the repository root:
+From the repository root, install the package in editable mode:
 
 ```powershell
 $env:PYTHONIOENCODING='utf-8'
-python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
-Prepare a local profile:
+Prepare the private workspace and extract a draft for user confirmation:
 
 ```powershell
-Copy-Item data/templates/student_profile.example.json data/private/student_profile.json
+tutor setup
+tutor profile extract
+tutor profile validate
 ```
 
-Run the three-stage workflow for a target key:
+Check target support and run the workflow:
 
 ```powershell
-python build_teacher_match.py <target>
-python update_teacher_match_with_dblp.py <target>
-python complete_teacher_research.py <target>
+tutor targets --check <target>
+tutor run <target>
 ```
 
 List supported targets:
 
 ```powershell
-python build_teacher_match.py --help
+tutor targets
 ```
 
 Run only final workbook reconstruction from checkpoint:
 
 ```powershell
-python complete_teacher_research.py <target> --finalize-only
+python scripts/legacy/complete_teacher_research.py <target> --finalize-only
 ```
 
 Audit checkpoint coverage and shadow-score current outputs:
 
 ```powershell
-python checkpoint_doctor.py <target>
-python result_quality_audit.py --fail-on-violations
+tutor doctor <target>
+tutor audit --fail-on-violations
 ```
 
 Run the unit tests:
@@ -126,19 +151,23 @@ python -m unittest discover -s tests -v
 Launch the local dashboard:
 
 ```powershell
-.\start_viewer.bat
+tutor view
 ```
+
+Windows users may instead double-click the repository-root `start_viewer.bat`.
+It reuses a compatible running Viewer and selects another loopback port when
+the preferred port is occupied by an older service.
 
 or:
 
 ```bash
-./start_viewer.sh
+./scripts/start_viewer.sh
 ```
 
 Manual server entry:
 
 ```powershell
-python viewer_server.py --port 8765
+python tutor.py view --port 8765
 ```
 
 If the frontend reports `/api/session` as 404, an old viewer process is still
@@ -147,7 +176,7 @@ using the port. Stop it and rerun the launcher; do not delete contact state.
 Sync local contact state back to workbooks:
 
 ```powershell
-python sync_contact_status_to_workbooks.py
+python scripts/legacy/sync_contact_status_to_workbooks.py
 ```
 
 ## Output Contract
@@ -186,8 +215,8 @@ Valid contact statuses are `已套磁`, `先不考虑`, `不可能`, and `不匹
 - Homepage and official directory text are baseline evidence.
 - Official PDF advisor libraries or team introductions may supplement
   direction, team, and source columns when a target exposes such attachments.
-- Overlapping targets from the same university should be built in one
-  `build_teacher_match.py` command so cross-target de-duplication can run.
+- Overlapping targets from the same university should be passed to one
+  `tutor run` command so first-pass cross-target de-duplication can run.
 - Targets in the same explicit `cross_target_overlap_group` may preserve the
   same stable teacher ID across multiple colleges when official affiliation
   evidence supports a real multi-college relationship. SEU CSE, Software, and
@@ -219,20 +248,22 @@ Valid contact statuses are `已套磁`, `先不考虑`, `不可能`, and `不匹
   DBLP/arXiv/web signals visually separate; missing structured fields in old
   workbooks should be labeled as old data instead of inferred.
 - Finalize-only reconstruction requires complete valid checkpoint coverage by
-  default. Use `checkpoint_doctor.py` before relying on it; partial output must
+  default. Use `tutor doctor` before relying on it; partial output must
   be explicitly requested.
 
 ## Adding A Target
 
 1. Choose `school_slug`, `college_slug`, and a target key.
 2. Register the target in `src/tutor_recommendation/teacher_match_targets.py`.
-3. Add or extend the directory parser in
-   `src/tutor_recommendation/first_pass_research.py`.
-4. Keep output columns stable for DBLP, arXiv, webpage, and viewer stages.
-5. Run the three-stage workflow and manually inspect high-value ambiguous rows.
-6. Store manual DBLP overrides in ignored `data/private/dblp_overrides.json`.
-7. Store manually reviewed web-search evidence in ignored
-   `data/private/web_search_curated.json`.
+3. Add or extend an official directory parser under
+   `src/tutor_recommendation/collectors/`; do not expand the compatibility
+   first-pass monolith for a new target.
+4. Bind the target in `src/tutor_recommendation/collectors/registry.py`.
+5. Add deterministic parser/registry regression coverage.
+6. Keep output columns stable for DBLP, arXiv, webpage, and viewer stages.
+7. Run the three-stage workflow and manually inspect high-value ambiguous rows.
+8. Prefer ignored `user_private/overrides/` for reviewed overrides; legacy
+   `data/private/` files remain readable during migration.
 
 ## Documentation Rules
 
