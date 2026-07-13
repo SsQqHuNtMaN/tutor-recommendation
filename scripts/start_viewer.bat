@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 set "HOST=127.0.0.1"
 if "%VIEWER_HOST%" neq "" set "HOST=%VIEWER_HOST%"
@@ -31,7 +31,7 @@ if not defined PYTHON_BIN (
   echo.
   echo Or set VIEWER_PYTHON to the Python executable that has these packages:
   echo   set VIEWER_PYTHON=D:\Conda\python.exe
-  echo   start_viewer.bat
+  echo   scripts\start_viewer.bat
   pause
   exit /b 1
 )
@@ -55,7 +55,7 @@ if not errorlevel 1 (
 
 echo Starting teacher viewer: %URL%
 if "%VIEWER_NO_BROWSER%" neq "1" start "" powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; Start-Process '%URL%'"
-"%PYTHON_BIN%" viewer_server.py --host "%HOST%" --port "%PORT%"
+"%PYTHON_BIN%" tutor.py view --host "%HOST%" --port "%PORT%"
 
 if errorlevel 1 pause
 exit /b %ERRORLEVEL%

@@ -32,6 +32,7 @@ from .teacher_identity import (
 )
 from .ranking_policy import evaluate_teacher, keyword_in_text as policy_keyword_in_text
 from .run_manifest import context_source_rows, create_run_context, write_stage_manifest
+from .private_paths import private_file
 
 
 TODAY = date.today().isoformat()
@@ -1850,7 +1851,7 @@ def fetch_fudan_ai_directory(session: requests.Session, config: TargetConfig) ->
 SEU_DEPARTMENT_PAGE = "https://cse.seu.edu.cn/54820/list.htm"
 SEU_ORGANIZATION_PAGE = "https://cse.seu.edu.cn/49430/list.htm"
 SEU_ADMISSIONS_NOTICE = "https://cse.seu.edu.cn/2026/0710/c49342a576431/page.htm"
-SEU_AFFILIATION_OVERRIDE_PATH = Path("data/private/seu_college_affiliations.json")
+SEU_AFFILIATION_OVERRIDE_PATH = private_file("seu_college_affiliations.json")
 SEU_DEPARTMENTS = {
     "计算机科学系",
     "计算机工程系",
@@ -3601,50 +3602,12 @@ def build_workbook(config: TargetConfig, rows: list[dict[str, Any]]) -> None:
 
 
 def fetch_target_rows(config: TargetConfig) -> list[dict[str, Any]]:
+    from .collectors.registry import resolve_collector
+
     session = requests.Session()
     session.trust_env = False
-    if config.key == "sjtu_cs":
-        rows = fetch_sjtu_cs_directory(session, config)
-    elif config.key == "sjtu_ai":
-        rows = fetch_sjtu_ai_directory(session, config)
-    elif config.key == "nju_cs":
-        rows = fetch_nju_cs_directory(session, config)
-    elif config.key == "nju_ai":
-        rows = fetch_nju_ai_directory(session, config)
-    elif config.key == "ruc_gsai":
-        rows = fetch_ruc_gsai_directory(session, config)
-    elif config.key == "ruc_ssai":
-        rows = fetch_ruc_ssai_directory(session, config)
-    elif config.key == "ruc_info":
-        rows = fetch_ruc_info_directory(session, config)
-    elif config.key == "nju_ra":
-        rows = fetch_nju_ra_directory(session, config)
-    elif config.key == "nju_is":
-        rows = fetch_nju_is_directory(session, config)
-    elif config.key == "nju_ic":
-        rows = fetch_nju_ic_directory(session, config)
-    elif config.key == "fudan_ciram":
-        rows = fetch_fudan_ciram_directory(session, config)
-    elif config.key == "fudan_ai":
-        rows = fetch_fudan_ai_directory(session, config)
-    elif config.key in {"seu_cse", "seu_software", "seu_ai"}:
-        rows = fetch_seu_directory(session, config)
-    elif config.key == "tongji_cs":
-        rows = fetch_tongji_cs_directory(session, config)
-    elif config.key == "tongji_see":
-        rows = fetch_tongji_see_directory(session, config)
-    elif config.key == "zju_cs":
-        rows = fetch_zju_cs_directory(session, config)
-    elif config.key == "zju_ai":
-        rows = fetch_zju_ai_directory(session, config)
-    elif config.key == "ustc_ai_ds":
-        rows = fetch_ustc_ai_ds_directory(session, config)
-    elif config.key == "zju_uiuc":
-        rows = fetch_zju_uiuc_directory(session, config)
-    elif config.key == "zju_cse":
-        rows = fetch_zju_cse_directory(session, config)
-    else:
-        raise ValueError(config.key)
+    collector = resolve_collector(config.key, globals())
+    rows = collector(session, config)
     return deduplicate_faculty_rows(rows, config)
 
 

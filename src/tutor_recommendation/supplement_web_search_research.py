@@ -24,6 +24,7 @@ from .ranking_policy import evaluate_legacy_row
 from .teacher_identity import TEACHER_ID_COLUMN, ensure_teacher_identity
 from .cache_utils import configured_max_age_days, read_cached_text
 from .run_manifest import create_run_context, recent_years, write_stage_manifest
+from .private_paths import private_file
 
 
 SEARCH_COLUMNS = [
@@ -53,7 +54,7 @@ WEB_SEARCH_DETAIL_COLUMNS = [
 ]
 
 RECENT_YEARS = set(recent_years())
-DEFAULT_CURATED_WEB_SEARCH_PATH = Path(os.environ.get("CURATED_WEB_SEARCH_PATH", "data/private/web_search_curated.json"))
+DEFAULT_CURATED_WEB_SEARCH_PATH = private_file("web_search_curated.json", env_name="CURATED_WEB_SEARCH_PATH")
 
 
 def compile_term_pattern(terms: list[str] | set[str], fallback: list[str]) -> re.Pattern[str]:

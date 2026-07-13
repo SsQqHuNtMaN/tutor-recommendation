@@ -1,5 +1,5 @@
 {
-  "_note": "这是公开占位模板，不代表项目作者或任何真实申请者。复制到 data/private/student_profile.json 后，请替换为自己的背景和目标方向。",
+  "_note": "这是公开占位模板，不代表项目作者或任何真实申请者。Coding Agent 会据此生成 user_private/profile/student_profile.draft.json；用户确认后再保存正式画像。",
   "resume_match_context": "示例画像：申请者希望匹配人工智能、机器学习、数据挖掘或软件工程相关导师。请按真实简历改写本字段。",
   "keyword_weights": [
     ["artificial intelligence", 10],

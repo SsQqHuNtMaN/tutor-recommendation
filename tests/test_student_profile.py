@@ -57,6 +57,24 @@ class StudentProfileTests(unittest.TestCase):
             with self.assertRaises(ProfileConfigurationError):
                 load_student_profile(path, allow_template=False)
 
+    def test_unconfirmed_draft_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "profile.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "_draft_requires_confirmation": True,
+                        "resume_match_context": "test",
+                        "keyword_weights": [["robot", 10]],
+                        "institute_bonus": [],
+                        "high_signal_terms": ["robot"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ProfileConfigurationError):
+                load_student_profile(path, allow_template=False)
+
 
 if __name__ == "__main__":
     unittest.main()

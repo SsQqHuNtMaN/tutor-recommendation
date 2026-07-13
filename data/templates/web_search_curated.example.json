@@ -1,5 +1,5 @@
 {
-  "_note": "Copy selected target sections to data/private/web_search_curated.json when you want to apply manually reviewed search evidence. Do not commit private curated evidence.",
+  "_note": "Copy selected target sections to user_private/overrides/web_search_curated.json when you want to apply manually reviewed search evidence. Do not commit private curated evidence.",
   "example_target": [
     {
       "姓名": "Teacher Name",

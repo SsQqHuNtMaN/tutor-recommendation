@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 HOST="${VIEWER_HOST:-127.0.0.1}"
 PORT="${1:-${VIEWER_PORT:-8765}}"
@@ -71,7 +71,7 @@ if is_port_occupied; then
 fi
 
 echo "Starting teacher viewer: $URL"
-"$PYTHON_BIN" viewer_server.py --host "$HOST" --port "$PORT" &
+"$PYTHON_BIN" tutor.py view --host "$HOST" --port "$PORT" &
 SERVER_PID=$!
 
 cleanup() {

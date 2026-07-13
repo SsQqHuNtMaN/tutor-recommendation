@@ -64,7 +64,8 @@ docs/private/project-context.local.md
 
 ## 私有状态位置
 
-- 学生画像：data/private/student_profile.json
+- 私人材料：user_private/source/
+- 学生画像：user_private/profile/student_profile.json
 - 输出结果：outputs/<school_slug>/<college_slug>/
 - 联系状态：outputs/contact_status.json
 ```
@@ -74,6 +75,7 @@ docs/private/project-context.local.md
 项目的公开使用入口见：
 
 - [README](../README.md)
+- [Coding Agent 工作流](agent-workflow.md)
 - [运行手册](runbook.md)
 - [工作流方法论](teacher-matching-workflow.md)
 - [输出目录规则](output-organization.md)

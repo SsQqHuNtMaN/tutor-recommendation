@@ -4,6 +4,9 @@
 *.doc
 data/private/*
 !data/private/README.md
+user_private/*
+!user_private/README.md
+!user_private/request.example.md
 docs/private/
 AGENTS.local.md
 
@@ -31,6 +34,7 @@ archive/
 # Python/runtime artifacts
 __pycache__/
 *.py[cod]
+*.egg-info/
 
 # Local secrets and environment files
 .env

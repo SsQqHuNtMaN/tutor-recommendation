@@ -14,7 +14,7 @@ from tutor_recommendation.viewer_server import (
 class ViewerSecurityTests(unittest.TestCase):
     def test_launchers_require_current_api_version(self) -> None:
         project_root = Path(__file__).resolve().parents[1]
-        for launcher in ("start_viewer.bat", "start_viewer.sh"):
+        for launcher in ("scripts/start_viewer.bat", "scripts/start_viewer.sh"):
             text = (project_root / launcher).read_text(encoding="utf-8")
             self.assertIn(f'health.get("apiVersion") == {VIEWER_API_VERSION}', text.replace("'", '"'))
 
