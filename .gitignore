@@ -7,6 +7,16 @@ data/private/*
 docs/private/
 AGENTS.local.md
 
+# Local plans, drafts, diagnostics, and handoff notes
+**/*-[Tt][Oo][Dd][Oo].md
+**/[Tt][Oo][Dd][Oo].md
+*.local.*
+*.raw.*
+*.log
+*.tmp
+*.bak
+*.swp
+
 # Generated research outputs and caches
 .codex/
 outputs/
@@ -27,3 +37,15 @@ __pycache__/
 .env.*
 *.key
 *.pem
+
+# Tool, test, editor, and OS artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+node_modules/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

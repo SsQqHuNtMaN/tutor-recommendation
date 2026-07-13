@@ -16,6 +16,18 @@
       </header>
 
       <section id="calendarPane" class="calendar-pane" aria-label="套磁日历">
+        <div class="calendar-pane-header">
+          <strong>套磁日历</strong>
+          <span id="calendarCollapsedSummary"></span>
+          <button
+            id="calendarToggle"
+            class="calendar-toggle"
+            type="button"
+            aria-controls="calendarLayout"
+            aria-expanded="true"
+            title="收起套磁日历"
+          ><span class="calendar-toggle-icon" aria-hidden="true"></span></button>
+        </div>
         <div id="calendarLayout" class="calendar-layout">
           <div class="calendar-toolbar">
             <div class="calendar-heading">
@@ -31,50 +43,69 @@
               <div class="calendar-filters" aria-label="日历筛选">
                 <select id="calendarSchoolFilter" aria-label="日历学校"></select>
                 <select id="calendarCollegeFilter" aria-label="日历学院"></select>
+                <button id="calendarFilterReset" class="filter-reset" type="button" disabled>重置</button>
               </div>
             </div>
           </div>
-          <div id="calendarLegend" class="calendar-legend" aria-label="四周回复情况数量"></div>
-          <div class="calendar-table-scroll">
-            <div class="calendar-weekdays" aria-hidden="true">
-              <span></span>
-              <span>星期一</span>
-              <span>星期二</span>
-              <span>星期三</span>
-              <span>星期四</span>
-              <span>星期五</span>
-              <span>星期六</span>
-              <span>星期日</span>
+          <div class="calendar-dashboard">
+            <div class="calendar-main">
+              <div id="calendarLegend" class="calendar-legend" aria-label="四周回复情况数量"></div>
+              <div class="calendar-table-scroll">
+                <div class="calendar-weekdays" aria-hidden="true">
+                  <span></span>
+                  <span>星期一</span>
+                  <span>星期二</span>
+                  <span>星期三</span>
+                  <span>星期四</span>
+                  <span>星期五</span>
+                  <span>星期六</span>
+                  <span>星期日</span>
+                </div>
+                <div id="calendarGrid" class="calendar-strip" aria-label="四周套磁情况"></div>
+              </div>
             </div>
-            <div id="calendarGrid" class="calendar-strip" aria-label="四周套磁情况"></div>
+            <aside class="calendar-side" aria-label="日历辅助信息">
+              <details id="calendarProgressOverview" class="calendar-progress-overview">
+                <summary>
+                  <span>查看学校 / 学院进度</span>
+                  <span id="calendarProgressSummary"></span>
+                </summary>
+                <div class="calendar-progress-popover">
+                  <div class="calendar-progress-scroll">
+                    <table class="calendar-progress-table">
+                      <thead>
+                        <tr>
+                          <th>学校</th>
+                          <th>学院</th>
+                          <th>教师记录</th>
+                          <th>已套磁</th>
+                          <th>有进展</th>
+                          <th>面试</th>
+                        </tr>
+                      </thead>
+                      <tbody id="calendarProgressBody"></tbody>
+                    </table>
+                  </div>
+                  <p>按学院成员记录计数，跨学院教师分别计入；统计不受当前四周日期范围限制。</p>
+                </div>
+              </details>
+              <section id="calendarSelectedDay" class="calendar-selected-day" aria-live="polite">
+                <div class="calendar-selected-heading">
+                  <h3 id="calendarSelectedDate">选择一天查看教师</h3>
+                  <span id="calendarSelectedCount" class="count-badge">0</span>
+                </div>
+                <div id="calendarSelectedTeachers" class="calendar-selected-teachers"></div>
+              </section>
+              <details id="missingDateSection" class="missing-date-section">
+                <summary>
+                  待补套磁日期
+                  <span id="missingDateCount" class="count-badge">0</span>
+                </summary>
+                <div id="missingDateList" class="missing-date-list"></div>
+              </details>
+            </aside>
           </div>
-          <section class="calendar-selected-day" aria-live="polite">
-            <div class="calendar-selected-heading">
-              <h3 id="calendarSelectedDate">选择一天查看教师</h3>
-              <span id="calendarSelectedCount" class="count-badge">0</span>
-            </div>
-            <div id="calendarSelectedTeachers" class="calendar-selected-teachers"></div>
-          </section>
-          <details id="missingDateSection" class="missing-date-section">
-            <summary>
-              待补套磁日期
-              <span id="missingDateCount" class="count-badge">0</span>
-            </summary>
-            <div id="missingDateList" class="missing-date-list"></div>
-          </details>
         </div>
-        <div class="calendar-collapsed-bar" aria-hidden="true">
-          <strong>套磁日历</strong>
-          <span id="calendarCollapsedSummary"></span>
-        </div>
-        <button
-          id="calendarToggle"
-          class="calendar-toggle"
-          type="button"
-          aria-controls="calendarLayout"
-          aria-expanded="true"
-          title="收起套磁日历"
-        >收起日历 ⌃</button>
       </section>
 
       <section class="filters" aria-label="教师列表筛选">
@@ -95,6 +126,7 @@
           <input id="weakEvidenceOnly" type="checkbox" />
           <span>低证据</span>
         </label>
+        <button id="listFilterReset" class="filter-reset" type="button" disabled>重置筛选</button>
       </section>
 
       <section id="workbench" class="workbench">
@@ -117,14 +149,16 @@
           </table>
         </div>
         <div id="detailShell" class="detail-shell">
-          <button
-            id="detailToggle"
-            class="detail-toggle"
-            type="button"
-            aria-controls="detailPane"
-            aria-expanded="true"
-            title="收起教师详情"
-          >&gt;</button>
+          <div class="detail-rail">
+            <button
+              id="detailToggle"
+              class="detail-toggle"
+              type="button"
+              aria-controls="detailPane"
+              aria-expanded="true"
+              title="收起教师详情"
+            ><span class="detail-toggle-icon" aria-hidden="true"></span></button>
+          </div>
           <aside id="detailPane" class="detail-pane">
             <div class="empty-detail">选择一位教师</div>
           </aside>

@@ -212,6 +212,8 @@ WebSearch 适用于低证据候选的二次发现：
 data/private/web_search_curated.json
 ```
 
+更完整的触发条件、采信边界和输出字段见 [WebSearch 补充层说明](web-search-supplement.md)。
+
 ## 10. 综合推荐
 
 所有阶段调用同一个 ranking policy，采集模块不再各自维护等级阈值。当前统一门槛为 `可以考虑 >= 24`、`强烈建议 >= 44`，且两者都必须先满足官方显式核心锚点。推荐等级由多类证据综合而来：

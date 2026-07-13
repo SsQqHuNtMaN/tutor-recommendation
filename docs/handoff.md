@@ -78,6 +78,4 @@ docs/private/project-context.local.md
 - [工作流方法论](teacher-matching-workflow.md)
 - [输出目录规则](output-organization.md)
 - [Viewer 日历与教师列表整合布局](viewer-integrated-layout.md)
-- [Viewer 固定视口与性能优化 TODO](viewer-ux-performance-todo.md)
-- [Viewer 四周条状日历 TODO](viewer-calendar-strip-todo.md)
-- [Hermes Agent 等方案适配调查](hermes-agent-evaluation-2026-07-11.md)
+- [WebSearch 补充层说明](web-search-supplement.md)

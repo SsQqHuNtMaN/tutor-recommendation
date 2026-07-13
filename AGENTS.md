@@ -68,14 +68,10 @@ directory into auditable teacher recommendation workbooks:
 - `src/tutor_recommendation/contact_status.py`: local contact-state schema.
 - `src/tutor_recommendation/viewer_server.py` and `viewer/`: local dashboard,
   four-week contact strip, teacher list, and detail workspace.
-- `docs/hermes-agent-evaluation-2026-07-11.md`: Agent-shell and orchestration
-  evaluation for Hermes and alternatives.
 - `docs/viewer-integrated-layout.md`: implemented calendar-above-list layout,
   shared selection behavior, and collapsible detail sidebar contract.
-- `docs/viewer-ux-performance-todo.md`: completed implementation and validation
-  record for independent calendar filters, fixed viewport, and performance work.
-- `docs/viewer-calendar-strip-todo.md`: active four-week strip-calendar work and
-  deferred design questions for cross-school and cross-college contact views.
+- `docs/web-search-supplement.md`: stable bounded WebSearch usage and evidence
+  acceptance rules.
 - Root `*.py` files are thin CLI wrappers that add `src` to `sys.path`.
 
 ## Common Commands
@@ -250,3 +246,6 @@ When workflow behavior changes, update public docs at the appropriate level:
 
 Local progress, applicant-specific choices, target result counts, and crawl
 audits belong in ignored `docs/private/`, not in tracked files.
+Future exploration, implementation plans, TODO checklists, local validation
+queues, and temporary handoff notes also belong in `docs/private/`; public docs
+describe only implemented behavior, reusable methodology, and stable contracts.

@@ -9,6 +9,7 @@ const LEGACY_STATUS_ALIASES = { 不考虑: "先不考虑" };
 const DEFAULT_RESPONSES = ["已发", "官回", "添加微信", "约面试", "考核", "已满"];
 const SIDEBAR_STORAGE_KEY = "tutor-viewer-sidebar-collapsed";
 const CALENDAR_STORAGE_KEY = "tutor-viewer-calendar-collapsed";
+const FILTER_PREFERENCES_STORAGE_KEY = "tutor-viewer-filter-preferences-v1";
 const TABLE_BATCH_SIZE = 120;
 const SEARCH_DEBOUNCE_MS = 160;
 
@@ -22,8 +23,10 @@ const state = {
   selectedKey: "",
   sidebarCollapsed: false,
   calendarCollapsed: false,
+  filterPreferencesReady: false,
   calendarRangeStart: "",
   selectedCalendarDate: "",
+  calendarDateInteracted: false,
   dirty: false,
   pendingSaves: 0,
   saveFailures: 0,
@@ -37,6 +40,7 @@ const els = {
   appShell: $("appShell"),
   calendarSchoolFilter: $("calendarSchoolFilter"),
   calendarCollegeFilter: $("calendarCollegeFilter"),
+  calendarFilterReset: $("calendarFilterReset"),
   searchInput: $("searchInput"),
   schoolFilter: $("schoolFilter"),
   collegeFilter: $("collegeFilter"),
@@ -45,6 +49,7 @@ const els = {
   contactedOnly: $("contactedOnly"),
   hideContacted: $("hideContacted"),
   weakEvidenceOnly: $("weakEvidenceOnly"),
+  listFilterReset: $("listFilterReset"),
   teacherRows: $("teacherRows"),
   tablePane: document.querySelector(".table-pane"),
   workbench: $("workbench"),
@@ -58,9 +63,12 @@ const els = {
   calendarRangeLabel: $("calendarRangeLabel"),
   calendarRangeSummary: $("calendarRangeSummary"),
   calendarLegend: $("calendarLegend"),
+  calendarProgressSummary: $("calendarProgressSummary"),
+  calendarProgressBody: $("calendarProgressBody"),
   calendarGrid: $("calendarGrid"),
   calendarSelectedDate: $("calendarSelectedDate"),
   calendarSelectedCount: $("calendarSelectedCount"),
+  calendarSelectedDay: $("calendarSelectedDay"),
   calendarSelectedTeachers: $("calendarSelectedTeachers"),
   missingDateSection: $("missingDateSection"),
   missingDateCount: $("missingDateCount"),
@@ -364,7 +372,6 @@ function applySidebarState() {
   els.workbench.classList.toggle("sidebar-collapsed", collapsed);
   els.detailPane.hidden = collapsed;
   els.detailToggle.hidden = !canCollapse;
-  els.detailToggle.textContent = collapsed ? "<" : ">";
   els.detailToggle.title = collapsed ? "展开教师详情" : "收起教师详情";
   els.detailToggle.setAttribute("aria-label", els.detailToggle.title);
   els.detailToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
@@ -392,12 +399,68 @@ function writeCalendarPreference(collapsed) {
   }
 }
 
+function readFilterPreferences() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(FILTER_PREFERENCES_STORAGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function selectHasValue(select, value) {
+  return Boolean(value) && Array.from(select.options).some((option) => option.value === value);
+}
+
+function restoreFilterPreferences() {
+  const preferences = readFilterPreferences();
+  const list = preferences.list && typeof preferences.list === "object" ? preferences.list : {};
+  const calendar = preferences.calendar && typeof preferences.calendar === "object" ? preferences.calendar : {};
+
+  els.schoolFilter.value = selectHasValue(els.schoolFilter, list.school) ? list.school : "";
+  populateCollegeFilter();
+  els.collegeFilter.value = selectHasValue(els.collegeFilter, list.college) ? list.college : "";
+  els.levelFilter.value = selectHasValue(els.levelFilter, list.level) ? list.level : "";
+  els.contactFilter.value = selectHasValue(els.contactFilter, list.status) ? list.status : "";
+  els.contactedOnly.checked = list.contactedOnly === true;
+  els.hideContacted.checked = list.hideMarked === true;
+  els.weakEvidenceOnly.checked = list.weakOnly === true;
+
+  els.calendarSchoolFilter.value = selectHasValue(els.calendarSchoolFilter, calendar.school) ? calendar.school : "";
+  populateCalendarCollegeFilter();
+  els.calendarCollegeFilter.value = selectHasValue(els.calendarCollegeFilter, calendar.college) ? calendar.college : "";
+}
+
+function writeFilterPreferences() {
+  if (!state.filterPreferencesReady) return;
+  const preferences = {
+    version: 1,
+    list: {
+      school: els.schoolFilter.value,
+      college: els.collegeFilter.value,
+      level: els.levelFilter.value,
+      status: els.contactFilter.value,
+      contactedOnly: els.contactedOnly.checked,
+      hideMarked: els.hideContacted.checked,
+      weakOnly: els.weakEvidenceOnly.checked,
+    },
+    calendar: {
+      school: els.calendarSchoolFilter.value,
+      college: els.calendarCollegeFilter.value,
+    },
+  };
+  try {
+    window.localStorage.setItem(FILTER_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+  } catch {
+    // Filter preferences are optional; no private contact content is stored here.
+  }
+}
+
 function applyCalendarState() {
   const collapsed = state.calendarCollapsed;
   els.appShell.classList.toggle("calendar-collapsed", collapsed);
   els.calendarPane.classList.toggle("is-collapsed", collapsed);
   els.calendarLayout.hidden = collapsed;
-  els.calendarToggle.textContent = collapsed ? "展开日历 ⌄" : "收起日历 ⌃";
   els.calendarToggle.title = collapsed ? "展开套磁日历" : "收起套磁日历";
   els.calendarToggle.setAttribute("aria-label", els.calendarToggle.title);
   els.calendarToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
@@ -410,7 +473,18 @@ function setCalendarCollapsed(collapsed) {
 }
 
 function detailToolbar() {
-  return '<div class="detail-toolbar"><span>教师详情</span></div>';
+  return `
+    <div class="detail-toolbar">
+      <span>教师详情</span>
+      <div class="detail-toolbar-actions">
+        <select id="detailJumpSelect" class="detail-jump-select" aria-label="快速定位详情内容" disabled>
+          <option value="">快速定位</option>
+        </select>
+        <button id="detailPrev" type="button" title="上一位教师（Alt+↑）">上一位</button>
+        <button id="detailNext" type="button" title="下一位教师（Alt+↓）">下一位</button>
+      </div>
+    </div>
+  `;
 }
 
 async function postJson(url, payload) {
@@ -476,6 +550,8 @@ function mergeLoadedRecords(records) {
   state.tableRenderLimit = TABLE_BATCH_SIZE;
   state.selectedKey = state.records[0]?.key || "";
   populateFilters();
+  restoreFilterPreferences();
+  state.filterPreferencesReady = true;
   applyCalendarFilters();
   applyFilters();
   setDirty(false);
@@ -589,7 +665,18 @@ function applyCalendarFilters() {
     if (college && record.collegeName !== college) return false;
     return true;
   });
+  const hasCalendarFilters = Boolean(school || college);
+  els.calendarFilterReset.disabled = !hasCalendarFilters;
+  els.calendarFilterReset.setAttribute("aria-label", hasCalendarFilters ? "重置日历筛选" : "日历筛选未启用");
+  writeFilterPreferences();
   renderCalendar();
+}
+
+function resetCalendarFilters() {
+  els.calendarSchoolFilter.value = "";
+  populateCalendarCollegeFilter();
+  els.calendarCollegeFilter.value = "";
+  applyCalendarFilters();
 }
 
 function compareRecords(a, b) {
@@ -662,6 +749,12 @@ function applyFilters() {
     return true;
   });
   state.filtered.sort(compareRecords);
+  const filterCount = [query, school, college, level, status].filter(Boolean).length
+    + [contactedOnly, hideMarked, weakOnly].filter(Boolean).length;
+  els.listFilterReset.disabled = filterCount === 0;
+  els.listFilterReset.textContent = filterCount ? `重置筛选 ${filterCount}` : "重置筛选";
+  els.listFilterReset.setAttribute("aria-label", filterCount ? `重置 ${filterCount} 项教师列表筛选` : "教师列表筛选未启用");
+  writeFilterPreferences();
   state.tableRenderLimit = TABLE_BATCH_SIZE;
   els.tablePane.scrollTop = 0;
   if (!state.records.some((record) => record.key === state.selectedKey)) {
@@ -670,6 +763,20 @@ function applyFilters() {
   renderTable();
   renderDetail();
   setSummary();
+}
+
+function resetListFilters() {
+  els.searchInput.value = "";
+  els.schoolFilter.value = "";
+  populateCollegeFilter();
+  els.collegeFilter.value = "";
+  els.levelFilter.value = "";
+  els.contactFilter.value = "";
+  els.contactedOnly.checked = false;
+  els.hideContacted.checked = false;
+  els.weakEvidenceOnly.checked = false;
+  applyFilters();
+  els.searchInput.focus();
 }
 
 function levelClass(level) {
@@ -876,15 +983,45 @@ function contactSummary(record) {
 
 function renderTable() {
   const fragment = document.createDocumentFragment();
+  if (!state.filtered.length) {
+    const tr = document.createElement("tr");
+    tr.className = "table-empty-row";
+    const cell = document.createElement("td");
+    cell.colSpan = 9;
+    const message = document.createElement("strong");
+    message.textContent = state.records.length ? "没有符合当前筛选的教师" : "尚未加载教师数据";
+    cell.appendChild(message);
+    if (state.records.length) {
+      const hint = document.createElement("span");
+      hint.textContent = "可调整条件或清除教师列表筛选。";
+      const reset = document.createElement("button");
+      reset.type = "button";
+      reset.className = "filter-reset table-empty-reset";
+      reset.textContent = "清除筛选";
+      reset.addEventListener("click", resetListFilters);
+      cell.append(hint, reset);
+    }
+    tr.appendChild(cell);
+    fragment.appendChild(tr);
+  }
   state.filtered.slice(0, state.tableRenderLimit).forEach((record) => {
     const row = record.raw;
     const tr = document.createElement("tr");
     tr.dataset.recordKey = record.key;
+    tr.tabIndex = 0;
+    tr.setAttribute("aria-selected", record.key === state.selectedKey ? "true" : "false");
+    tr.setAttribute("aria-label", `${norm(row["姓名"])}，${record.schoolName}，${record.collegeName}`);
     if (record.key === state.selectedKey) tr.classList.add("selected");
-    tr.addEventListener("click", () => {
+    const selectRow = () => {
       state.selectedKey = record.key;
       updateSelectedElements();
       renderDetail();
+    };
+    tr.addEventListener("click", selectRow);
+    tr.addEventListener("keydown", (event) => {
+      if (event.target !== tr || !["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      selectRow();
     });
 
     tr.appendChild(td(row["姓名"], "cell-main"));
@@ -929,12 +1066,38 @@ function calendarEventButton(record, compact = false) {
   const institution = document.createElement("span");
   institution.className = "calendar-event-institution";
   institution.textContent = `${record.schoolName} · ${record.collegeName}`;
-  const response = document.createElement("span");
-  response.className = "calendar-event-response";
-  response.textContent = compact && responseState.responses.length > 1
-    ? `${responseState.primary} +${responseState.responses.length - 1}`
-    : responseWithInterview;
-  button.append(name, institution, response);
+  const responses = document.createElement("span");
+  responses.className = "calendar-event-responses";
+  const visibleResponses = compact && responseState.responses.length > 1
+    ? [responseState.primary]
+    : responseState.responses;
+  if (visibleResponses.length) {
+    visibleResponses.forEach((label) => {
+      const response = document.createElement("span");
+      response.className = `calendar-event-response ${CALENDAR_RESPONSE_STYLES[label] || "response-unset"}`;
+      response.textContent = label;
+      responses.appendChild(response);
+    });
+    if (compact && responseState.responses.length > 1) {
+      const more = document.createElement("span");
+      more.className = "calendar-event-response response-unset";
+      more.textContent = `+${responseState.responses.length - 1}`;
+      responses.appendChild(more);
+    }
+  } else {
+    const response = document.createElement("span");
+    response.className = "calendar-event-response response-unset";
+    response.textContent = "未记录回复";
+    responses.appendChild(response);
+  }
+  if (interviewText) {
+    const interview = document.createElement("span");
+    interview.className = "calendar-event-response calendar-event-interview";
+    interview.textContent = `◆ ${interviewText}`;
+    interview.title = `面试 ${interviewText}`;
+    responses.appendChild(interview);
+  }
+  button.append(name, institution, responses);
   button.addEventListener("click", () => selectCalendarRecord(record.key));
   return button;
 }
@@ -984,6 +1147,54 @@ function calendarResponseCounts(records) {
     });
   });
   return counts;
+}
+
+function calendarProgressStats(records) {
+  let contacted = 0;
+  let progressed = 0;
+  let interviews = 0;
+  records.forEach((record) => {
+    const responses = splitResponses(record.contact?.responses || record.raw[CONTACT_RESPONSE_COLUMN]);
+    const interviewAt = normalizeInterviewAt(record.contact?.interview_at || record.raw[INTERVIEW_TIME_COLUMN]);
+    if (record.status === "已套磁") contacted += 1;
+    if (responses.some((response) => response !== "已发")) progressed += 1;
+    if (responses.includes("约面试") || interviewAt) interviews += 1;
+  });
+  return { total: records.length, contacted, progressed, interviews };
+}
+
+function renderCalendarProgressOverview() {
+  const groups = new Map();
+  state.calendarFiltered.forEach((record) => {
+    const key = `${record.schoolName}\u0000${record.collegeName}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(record);
+  });
+  const rows = [...groups.entries()]
+    .map(([key, records]) => {
+      const [school, college] = key.split("\u0000");
+      return { school, college, ...calendarProgressStats(records) };
+    })
+    .sort((a, b) => a.school.localeCompare(b.school, "zh-CN") || a.college.localeCompare(b.college, "zh-CN"));
+  const schoolCount = new Set(rows.map((row) => row.school).filter(Boolean)).size;
+  els.calendarProgressSummary.textContent = `${schoolCount} 所学校 · ${rows.length} 个学院`;
+
+  const fragment = document.createDocumentFragment();
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 6;
+    cell.textContent = "当前日历筛选下没有教师记录";
+    tr.appendChild(cell);
+    fragment.appendChild(tr);
+  }
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    [row.school, row.college, row.total, `${row.contacted} · ${row.total ? Math.round((row.contacted / row.total) * 100) : 0}%`, row.progressed, row.interviews]
+      .forEach((value) => tr.appendChild(td(value)));
+    fragment.appendChild(tr);
+  });
+  els.calendarProgressBody.replaceChildren(fragment);
 }
 
 function relativeWeekLabel(weekStart) {
@@ -1047,7 +1258,6 @@ function renderCalendarGrid(grouped, dates) {
       day.type = "button";
       day.className = "calendar-strip-day";
       day.dataset.date = date;
-      day.dataset.date = date;
       if (date === today) day.classList.add("today");
       if (date === state.selectedCalendarDate) day.classList.add("selected");
       day.setAttribute("aria-pressed", date === state.selectedCalendarDate ? "true" : "false");
@@ -1086,6 +1296,7 @@ function renderCalendarGrid(grouped, dates) {
       day.append(heading, countsNode);
       day.addEventListener("click", () => {
         state.selectedCalendarDate = date;
+        state.calendarDateInteracted = true;
         renderCalendar();
       });
       days.appendChild(day);
@@ -1106,6 +1317,7 @@ function renderSelectedCalendarDay(grouped) {
     weekday: "long",
   });
   els.calendarSelectedCount.textContent = String(records.length);
+  els.calendarSelectedDay.classList.toggle("is-user-selected", state.calendarDateInteracted);
   const fragment = document.createDocumentFragment();
   if (!records.length) {
     const empty = document.createElement("div");
@@ -1153,6 +1365,7 @@ function renderCalendar() {
   els.calendarRangeSummary.textContent = `四周共 ${rangeRecords.length} 位教师 · 日历范围 ${state.calendarFiltered.length} 位教师`;
   els.calendarCollapsedSummary.textContent = `${startLabel}起 · ${rangeRecords.length} 位教师`;
   renderCalendarLegend(rangeRecords, dates);
+  renderCalendarProgressOverview();
   renderCalendarGrid(grouped, dates);
   renderSelectedCalendarDay(grouped);
   renderMissingDates();
@@ -1165,7 +1378,9 @@ function renderOverview() {
 
 function updateSelectedElements() {
   document.querySelectorAll("[data-record-key]").forEach((element) => {
-    element.classList.toggle("selected", element.dataset.recordKey === state.selectedKey);
+    const selected = element.dataset.recordKey === state.selectedKey;
+    element.classList.toggle("selected", selected);
+    if (element.matches("tr")) element.setAttribute("aria-selected", selected ? "true" : "false");
   });
 }
 
@@ -1269,7 +1484,7 @@ function contactEditorSection(record) {
     })
     .join("");
   return `
-    <section class="section contact-editor">
+    <section id="detailContact" class="section contact-editor">
       <h2>套磁记录</h2>
       <div class="contact-grid">
         <label>
@@ -1326,7 +1541,7 @@ function bindContactEditor(record) {
 function extraInfoSection(row) {
   const items = affiliationItems(row);
   if (!items.length) return "";
-  return `<section class="section"><h2>补充信息</h2><div class="info-grid">${items
+  return `<section id="detailExtra" class="section"><h2>补充信息</h2><div class="info-grid">${items
     .map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`)
     .join("")}</div></section>`;
 }
@@ -1369,7 +1584,7 @@ function decisionSection(row) {
     ? `<div class="warning-box"><strong>需要复核</strong><span>${escapeHtml(warning)}</span></div>`
     : "";
   return `
-    <section class="decision-panel ${stateClass}">
+    <section id="detailDecision" class="decision-panel ${stateClass}">
       <div class="decision-head">
         <div>
           <div class="decision-label">套磁判断</div>
@@ -1402,7 +1617,7 @@ function scoreBreakdownSection(row) {
         ["搜索证据", norm(row["WebSearch证据条数"]) || "0", ""],
       ];
   const title = hasStructuredScores ? "计分构成" : "证据概览";
-  return `<section class="section score-section"><h2>${title}</h2><div class="score-strip">${entries
+  return `<section id="detailScores" class="section score-section"><h2>${title}</h2><div class="score-strip">${entries
     .map(
       ([label, value, meta]) =>
         `<div class="score-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>${
@@ -1443,13 +1658,73 @@ function directionSection(row) {
       )}</p></div>`
     : "";
   if (!matched && !official && !sources && !fallback) return "";
-  return `<section class="section direction-section"><h2>方向判断</h2>${matched}${official}${sources}${fallback}</section>`;
+  return `<section id="detailDirection" class="section direction-section"><h2>方向判断</h2>${matched}${official}${sources}${fallback}</section>`;
+}
+
+const DETAIL_JUMP_TARGETS = [
+  ["detailDecision", "套磁判断"],
+  ["detailScores", "计分构成"],
+  ["detailDirection", "方向判断"],
+  ["detailContact", "套磁记录"],
+  ["detailExtra", "补充信息"],
+  ["detailLinks", "链接"],
+  ["detailEvidence", "证据明细"],
+];
+
+function selectAdjacentTeacher(offset) {
+  const currentIndex = state.filtered.findIndex((record) => record.key === state.selectedKey);
+  if (currentIndex < 0) return;
+  const nextIndex = currentIndex + offset;
+  const next = state.filtered[nextIndex];
+  if (!next) return;
+  state.selectedKey = next.key;
+  if (nextIndex >= state.tableRenderLimit) {
+    state.tableRenderLimit = Math.min(state.filtered.length, Math.ceil((nextIndex + 1) / TABLE_BATCH_SIZE) * TABLE_BATCH_SIZE);
+    renderTable();
+  } else {
+    updateSelectedElements();
+  }
+  renderDetail();
+  window.requestAnimationFrame(() => {
+    document.querySelector(`tr[data-record-key="${CSS.escape(next.key)}"]`)?.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function bindDetailToolbar() {
+  const currentIndex = state.filtered.findIndex((record) => record.key === state.selectedKey);
+  const previous = els.detailPane.querySelector("#detailPrev");
+  const next = els.detailPane.querySelector("#detailNext");
+  if (previous) {
+    previous.disabled = currentIndex <= 0;
+    previous.addEventListener("click", () => selectAdjacentTeacher(-1));
+  }
+  if (next) {
+    next.disabled = currentIndex < 0 || currentIndex >= state.filtered.length - 1;
+    next.addEventListener("click", () => selectAdjacentTeacher(1));
+  }
+
+  const jump = els.detailPane.querySelector("#detailJumpSelect");
+  if (!jump) return;
+  DETAIL_JUMP_TARGETS.forEach(([id, label]) => {
+    if (!els.detailPane.querySelector(`#${id}`)) return;
+    const option = document.createElement("option");
+    option.value = id;
+    option.textContent = label;
+    jump.appendChild(option);
+  });
+  jump.disabled = jump.options.length <= 1;
+  jump.addEventListener("change", () => {
+    const target = jump.value ? els.detailPane.querySelector(`#${jump.value}`) : null;
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    jump.value = "";
+  });
 }
 
 function renderDetail() {
   const record = currentRecord();
   if (!record) {
     els.detailPane.innerHTML = `${detailToolbar()}<div class="empty-detail">选择一位教师</div>`;
+    bindDetailToolbar();
     applySidebarState();
     return;
   }
@@ -1471,10 +1746,11 @@ function renderDetail() {
     ${contactEditorSection(record)}
     ${extraInfoSection(row)}
     ${linksSection(row)}
-    ${detailEvidenceSections(record)}
+    <div id="detailEvidence">${detailEvidenceSections(record)}</div>
   `;
   els.detailPane.querySelector("#detailStatus").appendChild(contactSelect(record));
   bindContactEditor(record);
+  bindDetailToolbar();
   applySidebarState();
   if (shouldLoadDetails) loadRecordDetails(record);
 }
@@ -1521,7 +1797,7 @@ function linksSection(row) {
     ["DBLP作者", row["DBLP作者链接"]],
   ].filter(([, url]) => safeUrl(url));
   if (!links.length) return "";
-  return `<section class="section"><h2>链接</h2><div class="link-list">${links
+  return `<section id="detailLinks" class="section"><h2>链接</h2><div class="link-list">${links
     .map(([label, url]) => `<a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noreferrer">${escapeHtml(label)} · ${escapeHtml(url)}</a>`)
     .join("")}</div></section>`;
 }
@@ -1554,16 +1830,19 @@ function bindEvents() {
   els.calendarPrev.addEventListener("click", () => {
     state.calendarRangeStart = addCalendarDays(state.calendarRangeStart, -7);
     state.selectedCalendarDate = "";
+    state.calendarDateInteracted = false;
     renderCalendar();
   });
   els.calendarToday.addEventListener("click", () => {
     state.calendarRangeStart = startOfCalendarWeek();
     state.selectedCalendarDate = localTodayIso();
+    state.calendarDateInteracted = false;
     renderCalendar();
   });
   els.calendarNext.addEventListener("click", () => {
     state.calendarRangeStart = addCalendarDays(state.calendarRangeStart, 7);
     state.selectedCalendarDate = "";
+    state.calendarDateInteracted = false;
     renderCalendar();
   });
   els.calendarSchoolFilter.addEventListener("input", () => {
@@ -1571,6 +1850,7 @@ function bindEvents() {
     applyCalendarFilters();
   });
   els.calendarCollegeFilter.addEventListener("input", applyCalendarFilters);
+  els.calendarFilterReset.addEventListener("click", resetCalendarFilters);
   els.schoolFilter.addEventListener("input", () => {
     populateCollegeFilter();
     applyFilters();
@@ -1588,6 +1868,20 @@ function bindEvents() {
     els.hideContacted,
     els.weakEvidenceOnly,
   ].forEach((element) => element.addEventListener("input", applyFilters));
+  els.listFilterReset.addEventListener("click", resetListFilters);
+  window.addEventListener("keydown", (event) => {
+    const target = event.target;
+    const isEditing = target instanceof HTMLElement
+      && (target.matches("input, select, textarea") || target.isContentEditable);
+    if (isEditing || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      selectAdjacentTeacher(-1);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      selectAdjacentTeacher(1);
+    }
+  });
   window.addEventListener("beforeunload", (event) => {
     if (!state.dirty) return;
     event.preventDefault();
