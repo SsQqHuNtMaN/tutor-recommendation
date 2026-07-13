@@ -13,6 +13,14 @@ if "%~1" neq "" set "PORT=%~1"
 set "PYTHONIOENCODING=utf-8"
 set "URL=http://%HOST%:%PORT%/"
 
+rem Reuse an already-running current Viewer before looking for Python.
+powershell -NoProfile -Command "try { $health=Invoke-RestMethod -UseBasicParsing -TimeoutSec 1 '%URL%api/health'; $session=Invoke-RestMethod -UseBasicParsing -TimeoutSec 1 '%URL%api/session'; if ($health.apiVersion -eq 4 -and $session.token) { exit 0 } } catch {}; exit 1" >nul 2>nul
+if not errorlevel 1 (
+  echo Teacher viewer is already running: %URL%
+  if "%VIEWER_NO_BROWSER%" neq "1" start "" "%URL%"
+  exit /b 0
+)
+
 set "PYTHON_BIN="
 set "FIRST_PYTHON_CANDIDATE="
 
@@ -38,23 +46,28 @@ if not defined PYTHON_BIN (
 
 echo Using Python: %PYTHON_BIN%
 
-"%PYTHON_BIN%" -c "import json,sys,urllib.request; base=sys.argv[1].rstrip('/'); health=json.load(urllib.request.urlopen(base + '/api/health', timeout=0.5)); session=json.load(urllib.request.urlopen(base + '/api/session', timeout=0.5)); raise SystemExit(0 if health.get('apiVersion') == 4 and session.get('token') else 1)" "%URL%" >nul 2>nul
-if not errorlevel 1 (
-  echo Teacher viewer is already running: %URL%
-  if "%VIEWER_NO_BROWSER%" neq "1" start "" "%URL%"
-  exit /b 0
-)
-
-"%PYTHON_BIN%" -c "import sys, urllib.request; urllib.request.urlopen(sys.argv[1].rstrip('/') + '/api/health', timeout=0.5)" "%URL%" >nul 2>nul
-if not errorlevel 1 (
-  echo An older or incompatible viewer is already using %URL%
-  echo Close its terminal or stop that viewer process, then run start_viewer.bat again.
+set "PREFERRED_PORT=%PORT%"
+set "AVAILABLE_PORT="
+set "PYTHONPATH=%CD%\src;%PYTHONPATH%"
+set "PORT_FILE=%TEMP%\tutor_viewer_port_%RANDOM%_%RANDOM%.tmp"
+"%PYTHON_BIN%" -m tutor_recommendation.viewer_launcher --host "%HOST%" --start-port "%PORT%" >"%PORT_FILE%" 2>nul
+if not errorlevel 1 set /p "AVAILABLE_PORT="<"%PORT_FILE%"
+del /q "%PORT_FILE%" >nul 2>nul
+if not defined AVAILABLE_PORT (
+  echo No available Viewer port was found between %PORT% and the next 99 ports.
   pause
   exit /b 1
 )
+set "PORT=%AVAILABLE_PORT%"
+set "URL=http://%HOST%:%PORT%/"
+
+if not "%PORT%"=="%PREFERRED_PORT%" (
+  echo Port %PREFERRED_PORT% is already in use by an older Viewer or another program.
+  echo The current Viewer will use %URL% without stopping the existing process.
+)
 
 echo Starting teacher viewer: %URL%
-if "%VIEWER_NO_BROWSER%" neq "1" start "" powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; Start-Process '%URL%'"
+if "%VIEWER_NO_BROWSER%" neq "1" start "" powershell -NoProfile -WindowStyle Hidden -Command "$url='%URL%'; for ($i=0; $i -lt 60; $i++) { try { $health=Invoke-RestMethod -UseBasicParsing -TimeoutSec 1 ($url + 'api/health'); if ($health.apiVersion -eq 4) { Start-Process $url; exit 0 } } catch {}; Start-Sleep -Milliseconds 250 }; exit 1"
 "%PYTHON_BIN%" tutor.py view --host "%HOST%" --port "%PORT%"
 
 if errorlevel 1 pause

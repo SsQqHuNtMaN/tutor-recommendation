@@ -154,6 +154,10 @@ Launch the local dashboard:
 tutor view
 ```
 
+Windows users may instead double-click the repository-root `start_viewer.bat`.
+It reuses a compatible running Viewer and selects another loopback port when
+the preferred port is occupied by an older service.
+
 or:
 
 ```bash

@@ -59,7 +59,7 @@ tutor audit --fail-on-violations
 tutor view
 ```
 
-旧阶段包装器保存在 `scripts/legacy/` 作为兼容实现，Viewer 启动器位于 `scripts/`；Agent 和新自动化统一使用 `tutor` 入口。
+Windows 用户可以直接双击根目录的 `start_viewer.bat` 打开 Viewer。它会复用已经启动的当前服务；如果默认端口被旧版 Viewer 或其他程序占用，则自动选择空闲端口，不会终止旧进程或清除联系状态。旧阶段包装器保存在 `scripts/legacy/` 作为兼容实现，Agent 和新自动化统一使用 `tutor` 入口。
 
 详细实现和运维说明：
 

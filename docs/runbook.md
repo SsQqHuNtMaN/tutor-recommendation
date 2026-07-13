@@ -201,6 +201,8 @@ $env:CURATED_WEB_SEARCH_PATH='D:\path\to\web_search_curated.json'
 tutor view
 ```
 
+Windows 一键入口是仓库根目录的 `start_viewer.bat`，可以直接双击。启动器会复用已运行的当前 Viewer；默认端口被旧版 Viewer 或其他程序占用时，会自动选择后续空闲端口并打开正确地址，不会关闭旧进程或删除联系状态。
+
 或在 Git Bash / macOS / Linux 下：
 
 ```bash
