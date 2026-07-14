@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
@@ -15,6 +17,13 @@ from .private_workspace import (
     ensure_private_workspace,
     extract_profile_draft,
     initialize_profile_draft,
+)
+from .profile_registry import (
+    configure_profile_environment,
+    create_profile,
+    list_profiles,
+    resolve_profile,
+    set_active_profile,
 )
 from .teacher_match_targets import TARGETS
 
@@ -46,14 +55,14 @@ def command_setup(_: argparse.Namespace) -> int:
 
 
 def command_profile_init(args: argparse.Namespace) -> int:
-    path = initialize_profile_draft(force=args.force)
+    path = initialize_profile_draft(force=args.force, profile_id=getattr(args, "profile_id", None))
     print(path)
     return 0
 
 
 def command_profile_extract(args: argparse.Namespace) -> int:
     try:
-        path, sources = extract_profile_draft(force=args.force)
+        path, sources = extract_profile_draft(force=args.force, profile_id=getattr(args, "profile_id", None))
     except (FileNotFoundError, FileExistsError, RuntimeError, ValueError) as exc:
         print(f"profile extraction failed: {exc}", file=sys.stderr)
         return 2
@@ -64,7 +73,12 @@ def command_profile_extract(args: argparse.Namespace) -> int:
 
 def command_profile_validate(args: argparse.Namespace) -> int:
     default_path = PROFILE_PATH if PROFILE_PATH.is_file() or not LEGACY_PROFILE_PATH.is_file() else LEGACY_PROFILE_PATH
-    path = Path(args.path or default_path).expanduser().resolve()
+    value = args.path or default_path
+    try:
+        ref = resolve_profile(value)
+        path = ref.path
+    except (FileNotFoundError, ValueError):
+        path = Path(value).expanduser().resolve()
     if not path.is_file():
         print(f"profile not found: {path}", file=sys.stderr)
         return 2
@@ -84,7 +98,73 @@ def command_profile_validate(args: argparse.Namespace) -> int:
     except Exception as exc:
         print(f"profile validation failed: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps({"valid": True, "path": str(profile.source_path), "hash": profile.profile_hash}, ensure_ascii=False))
+    print(json.dumps({"valid": True, "profile_id": profile.profile_id, "display_name": profile.display_name, "path": str(profile.source_path), "hash": profile.profile_hash}, ensure_ascii=False))
+    return 0
+
+
+def command_profile_list(_: argparse.Namespace) -> int:
+    active = resolve_profile(None, require_exists=False).profile_id
+    payload = []
+    for ref in list_profiles(include_incomplete=True):
+        modified_at = ""
+        profile_hash = ""
+        if ref.exists:
+            try:
+                raw_data = json.loads(ref.path.read_text(encoding="utf-8"))
+                canonical = json.dumps(raw_data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                profile_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            except (OSError, json.JSONDecodeError):
+                profile_hash = "invalid"
+            modified_at = datetime.fromtimestamp(
+                ref.path.stat().st_mtime, tz=timezone.utc
+            ).isoformat(timespec="seconds")
+        payload.append(
+            {
+                "profile_id": ref.profile_id,
+                "display_name": ref.display_name,
+                "path": str(ref.path),
+                "exists": ref.exists,
+                "active": ref.profile_id == active,
+                "profile_hash": profile_hash,
+                "modified_at": modified_at,
+            }
+        )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def command_profile_create(args: argparse.Namespace) -> int:
+    try:
+        ref = create_profile(args.profile_id, args.display_name or "")
+        draft = initialize_profile_draft(force=args.force, profile_id=ref.profile_id)
+        if args.display_name:
+            data = json.loads(draft.read_text(encoding="utf-8"))
+            data["display_name"] = args.display_name.strip()
+            draft.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except (ValueError, OSError) as exc:
+        print(f"profile create failed: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps({"profile_id": ref.profile_id, "draft": str(draft), "source": str(ref.source_dir)}, ensure_ascii=False))
+    return 0
+
+
+def command_profile_use(args: argparse.Namespace) -> int:
+    try:
+        ref = set_active_profile(args.profile)
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        print(f"profile selection failed: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps({"profile_id": ref.profile_id, "display_name": ref.display_name}, ensure_ascii=False))
+    return 0
+
+
+def command_profile_current(_: argparse.Namespace) -> int:
+    try:
+        ref = resolve_profile()
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"profile selection failed: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps({"profile_id": ref.profile_id, "display_name": ref.display_name, "path": str(ref.path)}, ensure_ascii=False))
     return 0
 
 
@@ -110,9 +190,18 @@ def command_run(args: argparse.Namespace) -> int:
         print(f"Coding Agent: follow {AGENT_WORKFLOW} to add official target/collector/tests first", file=sys.stderr)
         return 2
     profile_args = _profile_arguments(args)
+    def evidence_stage(target_key: str) -> tuple[str, list[str]]:
+        target = TARGETS[target_key]
+        script = (
+            "update_teacher_match_with_math_publications.py"
+            if target.evidence_profile in {"mathematics", "mathematics_ai"}
+            else "update_teacher_match_with_dblp.py"
+        )
+        return script, [target_key, *profile_args]
+
     stages = [
         ("build_teacher_match.py", [*args.targets, *profile_args]),
-        ("update_teacher_match_with_dblp.py", [*args.targets[:1], *profile_args]),
+        evidence_stage(args.targets[0]),
         ("complete_teacher_research.py", [*args.targets[:1], *profile_args]),
     ]
     if len(args.targets) > 1:
@@ -121,7 +210,7 @@ def command_run(args: argparse.Namespace) -> int:
         for target in args.targets:
             stages.extend(
                 [
-                    ("update_teacher_match_with_dblp.py", [target, *profile_args]),
+                    evidence_stage(target),
                     ("complete_teacher_research.py", [target, *profile_args]),
                 ]
             )
@@ -134,7 +223,10 @@ def command_run(args: argparse.Namespace) -> int:
 
 
 def command_view(args: argparse.Namespace) -> int:
-    return _run_script("viewer_server.py", ["--host", args.host, "--port", str(args.port)])
+    forwarded = ["--host", args.host, "--port", str(args.port)]
+    if args.profile:
+        forwarded.extend(["--profile", args.profile])
+    return _run_script("viewer_server.py", forwarded)
 
 
 def command_doctor(args: argparse.Namespace) -> int:
@@ -161,14 +253,28 @@ def build_parser() -> argparse.ArgumentParser:
     profile = commands.add_parser("profile", help="Prepare or validate the private student profile")
     profile_commands = profile.add_subparsers(dest="profile_command", required=True)
     profile_init = profile_commands.add_parser("init", help="Create a profile draft from the public template")
+    profile_init.add_argument("profile_id", nargs="?")
     profile_init.add_argument("--force", action="store_true")
     profile_init.set_defaults(func=command_profile_init)
     profile_extract = profile_commands.add_parser("extract", help="Extract local materials into a draft profile")
+    profile_extract.add_argument("profile_id", nargs="?")
     profile_extract.add_argument("--force", action="store_true")
     profile_extract.set_defaults(func=command_profile_extract)
     profile_validate = profile_commands.add_parser("validate", help="Validate a user-confirmed formal profile")
     profile_validate.add_argument("path", nargs="?")
     profile_validate.set_defaults(func=command_profile_validate)
+    profile_list = profile_commands.add_parser("list", help="List local named profiles")
+    profile_list.set_defaults(func=command_profile_list)
+    profile_create = profile_commands.add_parser("create", help="Create an isolated named profile workspace")
+    profile_create.add_argument("profile_id")
+    profile_create.add_argument("--display-name")
+    profile_create.add_argument("--force", action="store_true")
+    profile_create.set_defaults(func=command_profile_create)
+    profile_use = profile_commands.add_parser("use", help="Set the default local profile")
+    profile_use.add_argument("profile")
+    profile_use.set_defaults(func=command_profile_use)
+    profile_current = profile_commands.add_parser("current", help="Show the default local profile")
+    profile_current.set_defaults(func=command_profile_current)
 
     targets = commands.add_parser("targets", help="List registered targets or check one target key")
     targets.add_argument("--check")
@@ -183,6 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
     view = commands.add_parser("view", help="Start the local Viewer")
     view.add_argument("--host", default="127.0.0.1")
     view.add_argument("--port", type=int, default=8765)
+    view.add_argument("--profile")
     view.set_defaults(func=command_view)
 
     doctor = commands.add_parser("doctor", help="Check checkpoint coverage")

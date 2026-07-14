@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .ranking_policy import POLICY_VERSION, SCHEMA_VERSION, norm_text
-from .student_profile import PROFILE_HASH, PROFILE_IS_DEMO, PROFILE_SOURCE
+from .student_profile import PROFILE_DISPLAY_NAME, PROFILE_HASH, PROFILE_ID, PROFILE_IS_DEMO, PROFILE_SOURCE
 from .teacher_identity import teacher_id_for_row
 
 
@@ -57,6 +57,8 @@ class RunContext:
     schema_version: int
     policy_version: str
     profile_hash: str
+    profile_id: str
+    profile_display_name: str
     profile_is_demo: bool
     profile_source: str
     code_revision: str
@@ -69,7 +71,13 @@ class RunContext:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def create_run_context(stage: str, target_key: str, input_paths: Iterable[Path] = ()) -> RunContext:
+def create_run_context(
+    stage: str,
+    target_key: str,
+    input_paths: Iterable[Path] = (),
+    *,
+    recent_year_count: int = 3,
+) -> RunContext:
     hashes = {str(path): file_sha256(path) for path in input_paths}
     return RunContext(
         run_id=f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}",
@@ -79,10 +87,12 @@ def create_run_context(stage: str, target_key: str, input_paths: Iterable[Path] 
         schema_version=SCHEMA_VERSION,
         policy_version=POLICY_VERSION,
         profile_hash=PROFILE_HASH,
+        profile_id=PROFILE_ID,
+        profile_display_name=PROFILE_DISPLAY_NAME,
         profile_is_demo=PROFILE_IS_DEMO,
         profile_source=str(PROFILE_SOURCE),
         code_revision=code_revision(),
-        recent_years=recent_years(),
+        recent_years=recent_years(count=recent_year_count),
         input_hashes=hashes,
     )
 
@@ -116,15 +126,33 @@ def write_stage_manifest(output_dir: Path, context: RunContext) -> Path:
     return path
 
 
+def assert_stage_profile_compatible(output_dir: Path, stage: str, context: RunContext) -> None:
+    data = load_manifest(output_dir)
+    previous = data.get("stages", {}).get(stage)
+    if not isinstance(previous, dict):
+        if context.profile_id != "legacy-default":
+            raise RuntimeError(f"required {stage} manifest is missing for profile {context.profile_id}; rerun that stage")
+        return
+    previous_id = str(previous.get("profile_id") or "legacy-default")
+    previous_hash = str(previous.get("profile_hash") or "")
+    if previous_id != context.profile_id or previous_hash != context.profile_hash:
+        raise RuntimeError(
+            f"student profile changed after {stage}: expected {context.profile_id}/{context.profile_hash[:12]}, "
+            f"found {previous_id}/{previous_hash[:12]}; rerun {stage}"
+        )
+
+
 def context_source_rows(context: RunContext) -> list[dict[str, str]]:
     return [
         {"项目": "运行ID", "内容": context.run_id},
         {"项目": "数据Schema版本", "内容": str(context.schema_version)},
         {"项目": "评分规则版本", "内容": context.policy_version},
         {"项目": "画像哈希", "内容": context.profile_hash},
+        {"项目": "画像ID", "内容": context.profile_id},
+        {"项目": "画像名称", "内容": context.profile_display_name},
         {"项目": "画像模式", "内容": "公开示例" if context.profile_is_demo else "本地私有画像"},
         {"项目": "代码版本", "内容": context.code_revision},
-        {"项目": "近三年口径", "内容": "/".join(context.recent_years)},
+        {"项目": "近年论文口径", "内容": "/".join(context.recent_years)},
         {"项目": "输入哈希", "内容": json.dumps(context.input_hashes, ensure_ascii=False, sort_keys=True)},
     ]
 
@@ -143,6 +171,12 @@ def checkpoint_fingerprint(row: Any, school_slug: str, college_slug: str, contex
         "DBLP作者链接",
         "DBLP近三年关键词",
         "DBLP近三年代表论文",
+        "学术作者匹配状态",
+        "学术作者匹配置信度",
+        "学术作者ID",
+        "主要数学分类",
+        "近五年关键词",
+        "近五年代表论文",
     ]
     payload = {
         "teacher_id": teacher_id_for_row(school_slug, college_slug, row),
@@ -150,6 +184,7 @@ def checkpoint_fingerprint(row: Any, school_slug: str, college_slug: str, contex
         "schema_version": context.schema_version,
         "policy_version": context.policy_version,
         "profile_hash": context.profile_hash,
+        "profile_id": context.profile_id,
         "recent_years": context.recent_years,
         "input_hashes": context.input_hashes,
     }

@@ -16,7 +16,6 @@ from urllib.parse import parse_qs, unquote, urlparse
 import pandas as pd
 
 from .contact_status import (
-    CONTACT_STATUS_PATH,
     STATUS_COLUMN,
     contact_entry_from_store,
     empty_store,
@@ -26,30 +25,41 @@ from .contact_status import (
     save_status_store,
     row_key as contact_row_key,
 )
+from .profile_registry import (
+    LEGACY_PROFILE_ID,
+    active_profile_id,
+    list_profiles,
+    output_root_for_profile_id,
+    resolve_profile,
+    set_active_profile,
+    validate_profile_id,
+)
 from .teacher_match_targets import TARGETS, TargetConfig
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 VIEWER_DIR = PROJECT_ROOT / "viewer"
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
-STATUS_STORE_PATH = (PROJECT_ROOT / CONTACT_STATUS_PATH).resolve()
+STATUS_STORE_PATH = (OUTPUTS_DIR / "contact_status.json").resolve()
 STATUS_LOCK = Lock()
 DATA_CACHE_LOCK = Lock()
-DATA_CACHE: dict[str, Any] = {"signature": None, "payload": None}
+DATA_CACHE: dict[str, dict[str, Any]] = {}
 DETAIL_CACHE_LOCK = Lock()
 DETAIL_CACHE: dict[str, dict[str, Any]] = {}
 CSRF_TOKEN = secrets.token_urlsafe(32)
-VIEWER_API_VERSION = 4
+VIEWER_API_VERSION = 6
 MAX_JSON_BYTES = 2 * 1024 * 1024
 SUMMARY_CACHE_VERSION = 1
 SUMMARY_CACHE_PATH = OUTPUTS_DIR / ".viewer_summary_cache.json"
 FINAL_SHEET = "全量教师名录"
 DETAIL_SHEETS = {
     "dblp": ["DBLP近三年明细", "DBLP近三年论文明细"],
-    "arxiv": ["arXiv近三年明细"],
+    "publication": ["数学文献近五年明细"],
+    "arxiv": ["arXiv近五年明细", "arXiv近三年明细"],
     "web": ["网页证据明细"],
     "webSearch": ["WebSearch证据明细"],
 }
+VIEWER_DEFAULT_PROFILE_ID = ""
 
 
 def is_loopback_host(host: str) -> bool:
@@ -157,25 +167,72 @@ def store_contact_entry_for_row(store: dict[str, Any], target: TargetConfig, raw
     return candidates[0] if len(candidates) == 1 else {}
 
 
-def workbook_signature() -> tuple[tuple[str, str, Any, Any], ...]:
+def profile_output_root(profile_id: str) -> Path:
+    return output_root_for_profile_id(validate_profile_id(profile_id))
+
+
+def profile_status_path(profile_id: str) -> Path:
+    return profile_output_root(profile_id) / "contact_status.json"
+
+
+def target_final_path(target: TargetConfig, profile_id: str) -> Path:
+    return profile_output_root(profile_id) / target.school_slug / target.college_slug / f"{target.output_prefix}_full_research.xlsx"
+
+
+def summary_cache_path(profile_id: str) -> Path:
+    if profile_id == LEGACY_PROFILE_ID:
+        return SUMMARY_CACHE_PATH
+    return profile_output_root(profile_id) / ".viewer_summary_cache.json"
+
+
+def request_profile(profile_id: str | None = None):
+    requested = profile_id or VIEWER_DEFAULT_PROFILE_ID or active_profile_id()
+    ref = resolve_profile(requested)
+    if ref.is_custom_path:
+        raise ValueError("Viewer only exposes registered local profiles")
+    return ref
+
+
+def profile_session_payload() -> dict[str, Any]:
+    default_id = request_profile().profile_id
+    profiles = []
+    for ref in list_profiles():
+        has_results = any(target_final_path(target, ref.profile_id).is_file() for target in TARGETS.values())
+        profiles.append(
+            {
+                "profileId": ref.profile_id,
+                "displayName": ref.display_name,
+                "hasResults": has_results,
+                "isDefault": ref.profile_id == default_id,
+            }
+        )
+    return {"defaultProfileId": default_id, "profiles": profiles}
+
+
+def set_viewer_default_profile(profile_id: str) -> None:
+    global VIEWER_DEFAULT_PROFILE_ID
+    VIEWER_DEFAULT_PROFILE_ID = validate_profile_id(profile_id)
+
+
+def workbook_signature(profile_id: str = LEGACY_PROFILE_ID) -> tuple[tuple[str, str, Any, Any], ...]:
     signature: list[tuple[str, str, Any, Any]] = []
     for key in TARGETS:
         target = TARGETS[key]
-        path = (PROJECT_ROOT / target.final_path).resolve()
+        path = target_final_path(target, profile_id).resolve()
         try:
             stat = path.stat()
         except FileNotFoundError:
-            signature.append((key, str(target.final_path), None, None))
+            signature.append((key, str(path), None, None))
             continue
-        signature.append((key, str(target.final_path), stat.st_mtime_ns, stat.st_size))
+        signature.append((key, str(path), stat.st_mtime_ns, stat.st_size))
     return tuple(signature)
 
 
-def build_base_records() -> list[dict[str, Any]]:
+def build_base_records(profile_id: str = LEGACY_PROFILE_ID) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for key in TARGETS:
         target = TARGETS[key]
-        final_path = PROJECT_ROOT / target.final_path
+        final_path = target_final_path(target, profile_id)
         if not final_path.exists():
             continue
         rows = read_sheet(final_path, FINAL_SHEET)
@@ -188,7 +245,7 @@ def build_base_records() -> list[dict[str, Any]]:
                     "collegeSlug": target.college_slug,
                     "schoolName": target.school_name,
                     "collegeName": target.college_name,
-                    "sourcePath": str(target.final_path),
+                    "sourcePath": str(final_path),
                     "raw": raw,
                     "key": row_key,
                 }
@@ -196,9 +253,10 @@ def build_base_records() -> list[dict[str, Any]]:
     return records
 
 
-def load_summary_cache(signature: tuple[tuple[str, str, Any, Any], ...]) -> list[dict[str, Any]] | None:
+def load_summary_cache(signature: tuple[tuple[str, str, Any, Any], ...], profile_id: str = LEGACY_PROFILE_ID) -> list[dict[str, Any]] | None:
+    cache_path = summary_cache_path(profile_id)
     try:
-        payload = json.loads(SUMMARY_CACHE_PATH.read_text(encoding="utf-8"))
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
     if payload.get("version") != SUMMARY_CACHE_VERSION:
@@ -209,35 +267,36 @@ def load_summary_cache(signature: tuple[tuple[str, str, Any, Any], ...]) -> list
     return records if isinstance(records, list) else None
 
 
-def save_summary_cache(signature: tuple[tuple[str, str, Any, Any], ...], records: list[dict[str, Any]]) -> None:
-    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+def save_summary_cache(signature: tuple[tuple[str, str, Any, Any], ...], records: list[dict[str, Any]], profile_id: str = LEGACY_PROFILE_ID) -> None:
+    cache_path = summary_cache_path(profile_id)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "version": SUMMARY_CACHE_VERSION,
         "signature": [list(item) for item in signature],
         "records": records,
     }
-    temp_path = SUMMARY_CACHE_PATH.with_suffix(".tmp")
+    temp_path = cache_path.with_suffix(".tmp")
     temp_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    temp_path.replace(SUMMARY_CACHE_PATH)
+    temp_path.replace(cache_path)
 
 
-def base_records() -> list[dict[str, Any]]:
-    signature = workbook_signature()
-    cached = load_summary_cache(signature)
+def base_records(profile_id: str = LEGACY_PROFILE_ID) -> list[dict[str, Any]]:
+    signature = workbook_signature(profile_id)
+    cached = load_summary_cache(signature, profile_id)
     if cached is not None:
         return cached
-    records = build_base_records()
+    records = build_base_records(profile_id)
     try:
-        save_summary_cache(signature, records)
+        save_summary_cache(signature, records, profile_id)
     except OSError:
         pass
     return records
 
 
-def build_records() -> list[dict[str, Any]]:
-    store = load_status_store(STATUS_STORE_PATH)
+def build_records(profile_id: str = LEGACY_PROFILE_ID) -> list[dict[str, Any]]:
+    store = load_status_store(profile_status_path(profile_id))
     records: list[dict[str, Any]] = []
-    for base in base_records():
+    for base in base_records(profile_id):
         target_name = norm_text(base.get("_targetKey"))
         target = TARGETS.get(target_name)
         if target is None:
@@ -266,14 +325,15 @@ def build_records() -> list[dict[str, Any]]:
     return records
 
 
-def source_signature() -> tuple[tuple[str, str, Any, Any], ...]:
-    signature = list(workbook_signature())
+def source_signature(profile_id: str = LEGACY_PROFILE_ID) -> tuple[tuple[str, str, Any, Any], ...]:
+    signature = list(workbook_signature(profile_id))
+    status_path = profile_status_path(profile_id)
     try:
-        status_stat = STATUS_STORE_PATH.stat()
+        status_stat = status_path.stat()
     except FileNotFoundError:
-        signature.append(("contact_status", str(CONTACT_STATUS_PATH), None, None))
+        signature.append(("contact_status", str(status_path), None, None))
     else:
-        signature.append(("contact_status", str(CONTACT_STATUS_PATH), status_stat.st_mtime_ns, status_stat.st_size))
+        signature.append(("contact_status", str(status_path), status_stat.st_mtime_ns, status_stat.st_size))
     return tuple(signature)
 
 
@@ -291,8 +351,8 @@ def detail_indexes_for_path(path: Path) -> dict[str, dict[str, list[dict[str, An
         return indexes
 
 
-def detail_payload(row_key: str) -> dict[str, Any] | None:
-    record = next((item for item in data_payload()["records"] if item.get("key") == row_key), None)
+def detail_payload(row_key: str, profile_id: str = LEGACY_PROFILE_ID) -> dict[str, Any] | None:
+    record = next((item for item in data_payload(profile_id)["records"] if item.get("key") == row_key), None)
     if record is None:
         return None
     source_path = Path(norm_text(record.get("sourcePath")))
@@ -304,34 +364,37 @@ def detail_payload(row_key: str) -> dict[str, Any] | None:
     return {
         "key": row_key,
         "dblp": matching_details(indexes["dblp"], raw),
+        "publication": matching_details(indexes.get("publication", {}), raw),
         "arxiv": matching_details(indexes["arxiv"], raw),
         "web": matching_details(indexes["web"], raw),
         "webSearch": matching_details(indexes["webSearch"], raw),
     }
 
 
-def data_payload() -> dict[str, Any]:
+def data_payload(profile_id: str = LEGACY_PROFILE_ID) -> dict[str, Any]:
     with DATA_CACHE_LOCK:
-        signature = source_signature()
-        if DATA_CACHE["signature"] == signature and DATA_CACHE["payload"] is not None:
-            return DATA_CACHE["payload"]
+        signature = source_signature(profile_id)
+        cached = DATA_CACHE.get(profile_id, {})
+        if cached.get("signature") == signature and cached.get("payload") is not None:
+            return cached["payload"]
         payload = {
-            "records": build_records(),
-            "statusStore": status_store_for_response(),
+            "profileId": profile_id,
+            "records": build_records(profile_id),
+            "statusStore": status_store_for_response(profile_id),
             "generatedAt": datetime.now().isoformat(timespec="seconds"),
         }
-        DATA_CACHE["signature"] = signature
-        DATA_CACHE["payload"] = payload
+        DATA_CACHE[profile_id] = {"signature": signature, "payload": payload}
         return payload
 
 
-def status_store_for_response() -> dict[str, Any]:
-    return load_status_store(STATUS_STORE_PATH) if STATUS_STORE_PATH.exists() else empty_store()
+def status_store_for_response(profile_id: str = LEGACY_PROFILE_ID) -> dict[str, Any]:
+    path = profile_status_path(profile_id)
+    return load_status_store(path) if path.exists() else empty_store()
 
 
-def save_contact_entry(key: str, entry: dict[str, Any]) -> dict[str, Any]:
+def save_contact_entry(key: str, entry: dict[str, Any], profile_id: str = LEGACY_PROFILE_ID) -> dict[str, Any]:
     with STATUS_LOCK:
-        store = status_store_for_response()
+        store = status_store_for_response(profile_id)
         statuses = store.setdefault("statuses", {})
         normalized = normalize_contact_entry(entry)
         if normalized:
@@ -339,8 +402,9 @@ def save_contact_entry(key: str, entry: dict[str, Any]) -> dict[str, Any]:
             statuses[key] = normalized
         else:
             statuses.pop(key, None)
-        save_status_store(store, STATUS_STORE_PATH)
-        return status_store_for_response()
+        save_status_store(store, profile_status_path(profile_id))
+        DATA_CACHE.pop(profile_id, None)
+        return status_store_for_response(profile_id)
 
 
 class ViewerHandler(SimpleHTTPRequestHandler):
@@ -352,14 +416,24 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             self.write_json({"ok": True, "apiVersion": VIEWER_API_VERSION})
             return
         if parsed.path == "/api/session":
-            self.write_json({"token": CSRF_TOKEN, "apiVersion": VIEWER_API_VERSION})
+            self.write_json({"token": CSRF_TOKEN, "apiVersion": VIEWER_API_VERSION, **profile_session_payload()})
             return
         if parsed.path == "/api/data":
-            self.write_json(data_payload())
+            try:
+                profile_id = request_profile(parse_qs(parsed.query).get("profile", [""])[0]).profile_id
+            except (FileNotFoundError, ValueError):
+                self.write_json({"error": "unknown student profile"}, HTTPStatus.BAD_REQUEST)
+                return
+            self.write_json(data_payload(profile_id))
             return
         if parsed.path == "/api/detail":
             row_key = norm_text(parse_qs(parsed.query).get("key", [""])[0])
-            details = detail_payload(row_key) if row_key else None
+            try:
+                profile_id = request_profile(parse_qs(parsed.query).get("profile", [""])[0]).profile_id
+            except (FileNotFoundError, ValueError):
+                self.write_json({"error": "unknown student profile"}, HTTPStatus.BAD_REQUEST)
+                return
+            details = detail_payload(row_key, profile_id) if row_key else None
             if details is None:
                 self.write_json({"error": "teacher detail not found"}, HTTPStatus.NOT_FOUND)
             else:
@@ -401,11 +475,25 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/contact":
             key = norm_text(payload.get("key"))
             entry = payload.get("entry") or {}
+            try:
+                profile_id = request_profile(norm_text(payload.get("profileId"))).profile_id
+            except (FileNotFoundError, ValueError):
+                self.write_json({"error": "unknown student profile"}, HTTPStatus.BAD_REQUEST)
+                return
             if not key or not isinstance(entry, dict):
                 self.write_json({"error": "key and entry are required"}, HTTPStatus.BAD_REQUEST)
                 return
-            store = save_contact_entry(key, entry)
-            self.write_json({"ok": True, "statusStore": store})
+            store = save_contact_entry(key, entry, profile_id)
+            self.write_json({"ok": True, "profileId": profile_id, "statusStore": store})
+            return
+        if parsed.path == "/api/profile-selection":
+            try:
+                ref = set_active_profile(norm_text(payload.get("profileId")))
+            except (FileNotFoundError, ValueError, OSError):
+                self.write_json({"error": "unknown student profile"}, HTTPStatus.BAD_REQUEST)
+                return
+            set_viewer_default_profile(ref.profile_id)
+            self.write_json({"ok": True, "defaultProfileId": ref.profile_id})
             return
         self.write_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
@@ -469,12 +557,18 @@ class ViewerHandler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
+    global VIEWER_DEFAULT_PROFILE_ID
     parser = argparse.ArgumentParser(description="Serve the teacher contact dashboard with local outputs APIs.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--profile", help="Initial named student profile shown in the Viewer")
     args = parser.parse_args()
     if not is_loopback_host(args.host):
         parser.error("the viewer may only listen on localhost/loopback addresses")
+    try:
+        VIEWER_DEFAULT_PROFILE_ID = request_profile(args.profile).profile_id
+    except (FileNotFoundError, ValueError) as exc:
+        parser.error(str(exc))
     server = ThreadingHTTPServer((args.host, args.port), ViewerHandler)
     print(f"Teacher viewer: http://{args.host}:{args.port}/")
     print("Press Ctrl+C to stop.")

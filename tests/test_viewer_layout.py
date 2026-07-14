@@ -24,6 +24,8 @@ class ViewerLayoutTests(unittest.TestCase):
         self.assertIn('id="listFilterReset"', html)
         self.assertIn('id="calendarProgressOverview"', html)
         self.assertIn('id="calendarProgressBody"', html)
+        self.assertIn('id="profileSelector"', html)
+        self.assertIn('class="profile-switcher"', html)
         self.assertIn('class="calendar-dashboard"', html)
         self.assertIn('class="calendar-main"', html)
         self.assertIn('class="calendar-side"', html)
@@ -56,6 +58,9 @@ class ViewerLayoutTests(unittest.TestCase):
         self.assertIn('FILTER_PREFERENCES_STORAGE_KEY', script)
         self.assertIn('function restoreFilterPreferences()', script)
         self.assertIn('function writeFilterPreferences()', script)
+        self.assertIn('async function switchProfile(profileId)', script)
+        self.assertIn('/api/profile-selection', script)
+        self.assertIn('profileId, key: record.key', script)
         self.assertNotIn('search: els.searchInput.value', script)
         self.assertIn('tr.setAttribute("aria-selected"', script)
         self.assertIn('tr.addEventListener("keydown"', script)
@@ -78,6 +83,14 @@ class ViewerLayoutTests(unittest.TestCase):
         self.assertNotIn("syncExcel", script)
         self.assertNotIn("/api/status-store", server)
         self.assertNotIn("/api/sync-excel", server)
+
+    def test_math_publication_evidence_contract_is_present(self) -> None:
+        script = (PROJECT_ROOT / "viewer" / "assets" / "app.js").read_text(encoding="utf-8")
+        server = (PROJECT_ROOT / "src" / "tutor_recommendation" / "viewer_server.py").read_text(encoding="utf-8")
+        self.assertIn("数学文献近五年", script)
+        self.assertIn('["数学论文", "论文证据分"', script)
+        self.assertIn("record.publication", script)
+        self.assertIn('"publication": ["数学文献近五年明细"]', server)
 
 
 if __name__ == "__main__":

@@ -30,12 +30,14 @@ from .ranking_policy import (
 from .teacher_identity import TEACHER_ID_COLUMN, ensure_teacher_identity, teacher_record_key
 from .cache_utils import configured_max_age_days, read_cached_text
 from .run_manifest import context_source_rows, create_run_context, recent_years, write_stage_manifest
+from .run_manifest import assert_stage_profile_compatible
+from .profile_registry import configured_output_root
 from .private_paths import private_file
 
 
 SCHOOL_SLUG = os.environ.get("SCHOOL_SLUG", "sjtu")
 COLLEGE_SLUG = os.environ.get("COLLEGE_SLUG", "cs")
-OUTPUT_DIR = Path("outputs") / SCHOOL_SLUG / COLLEGE_SLUG
+OUTPUT_DIR = configured_output_root() / SCHOOL_SLUG / COLLEGE_SLUG
 OUTPUT_PREFIX = f"{SCHOOL_SLUG}_{COLLEGE_SLUG}_teacher_match"
 INPUT_PATH = OUTPUT_DIR / f"{OUTPUT_PREFIX}.xlsx"
 OUTPUT_PATH = OUTPUT_DIR / f"{OUTPUT_PREFIX}_dblp.xlsx"
@@ -721,6 +723,7 @@ def main() -> None:
         raise FileNotFoundError(f"未找到输入表：{INPUT_PATH}")
 
     run_context = create_run_context("dblp", f"{SCHOOL_SLUG}_{COLLEGE_SLUG}", [INPUT_PATH])
+    assert_stage_profile_compatible(OUTPUT_DIR, "first_pass", run_context)
     df = pd.read_excel(INPUT_PATH, sheet_name="全量教师名录")
     df = pd.DataFrame(
         ensure_teacher_identity(SCHOOL_SLUG, COLLEGE_SLUG, row.to_dict())

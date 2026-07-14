@@ -42,8 +42,13 @@ def main() -> None:
     if args.demo_profile and args.profile:
         parser.error("--profile and --demo-profile are mutually exclusive")
     if args.profile:
-        os.environ.pop("TUTOR_ALLOW_TEMPLATE_PROFILE", None)
-        os.environ["STUDENT_PROFILE_PATH"] = args.profile
+        from tutor_recommendation.profile_registry import configure_profile_environment
+
+        configure_profile_environment(args.profile)
+    elif not args.demo_profile:
+        from tutor_recommendation.profile_registry import configure_profile_environment
+
+        configure_profile_environment()
     if args.demo_profile:
         os.environ.pop("STUDENT_PROFILE_PATH", None)
         os.environ["TUTOR_ALLOW_TEMPLATE_PROFILE"] = "1"

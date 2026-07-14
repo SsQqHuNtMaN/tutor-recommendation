@@ -38,6 +38,8 @@ const SEARCH_DEBOUNCE_MS = 160;
 
 const state = {
   csrfToken: "",
+  profiles: [],
+  currentProfileId: "",
   statusStore: { version: 4, updated_at: "", statuses: {} },
   records: [],
   filtered: [],
@@ -60,6 +62,7 @@ const $ = (id) => document.getElementById(id);
 
 const els = {
   summary: $("summary"),
+  profileSelector: $("profileSelector"),
   appShell: $("appShell"),
   calendarSchoolFilter: $("calendarSchoolFilter"),
   calendarCollegeFilter: $("calendarCollegeFilter"),
@@ -207,7 +210,8 @@ function writeCalendarPreference(collapsed) {
 
 function readFilterPreferences() {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(FILTER_PREFERENCES_STORAGE_KEY) || "{}");
+    const key = `${FILTER_PREFERENCES_STORAGE_KEY}:${state.currentProfileId || "default"}`;
+    const parsed = JSON.parse(window.localStorage.getItem(key) || "{}");
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -256,7 +260,8 @@ function writeFilterPreferences() {
     },
   };
   try {
-    window.localStorage.setItem(FILTER_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+    const key = `${FILTER_PREFERENCES_STORAGE_KEY}:${state.currentProfileId || "default"}`;
+    window.localStorage.setItem(key, JSON.stringify(preferences));
   } catch {
     // Filter preferences are optional; no private contact content is stored here.
   }
@@ -314,13 +319,15 @@ function contactPayload(record) {
 }
 
 function queueContactSave(record) {
-  const payload = { key: record.key, entry: contactPayload(record) };
+  const profileId = state.currentProfileId;
+  const payload = { profileId, key: record.key, entry: contactPayload(record) };
   state.pendingSaves += 1;
   setDirty(true);
   state.saveQueue = state.saveQueue
     .catch(() => {})
     .then(async () => {
       const data = await postJson("/api/contact", payload);
+      if (data.profileId !== state.currentProfileId) return;
       state.statusStore = normalizeStore(data.statusStore || state.statusStore);
       state.saveFailures = 0;
     })
@@ -363,22 +370,27 @@ function mergeLoadedRecords(records) {
   setDirty(false);
 }
 
-async function loadFromApi() {
-  const sessionResponse = await fetch("/api/session", { cache: "no-store" });
-  if (sessionResponse.status === 404) {
-    throw new Error("当前运行的是旧版看板服务，请关闭旧服务后重新运行 start_viewer.bat");
-  }
-  if (!sessionResponse.ok) throw new Error(`会话初始化失败：${sessionResponse.status}`);
-  const session = await sessionResponse.json();
-  if (Number(session.apiVersion || 0) < 4) {
-    throw new Error("当前运行的是旧版看板服务，请关闭旧服务后重新运行 start_viewer.bat");
-  }
-  state.csrfToken = norm(session.token);
-  if (!state.csrfToken) throw new Error("会话令牌缺失");
-  const response = await fetch("/api/data", { cache: "no-store" });
+function populateProfileSelector() {
+  els.profileSelector.innerHTML = "";
+  state.profiles.forEach((profile) => {
+    const option = document.createElement("option");
+    option.value = profile.profileId;
+    option.textContent = `${profile.displayName}${profile.hasResults ? "" : " · 暂无结果"}`;
+    els.profileSelector.appendChild(option);
+  });
+  els.profileSelector.value = state.currentProfileId;
+  els.profileSelector.disabled = state.profiles.length <= 1;
+}
+
+async function loadProfileData(profileId, { announce = true } = {}) {
+  const response = await fetch(`/api/data?profile=${encodeURIComponent(profileId)}`, { cache: "no-store" });
   if (!response.ok) throw new Error(`加载失败：${response.status}`);
   const data = await response.json();
+  state.currentProfileId = norm(data.profileId || profileId);
+  els.profileSelector.value = state.currentProfileId;
   state.statusStore = normalizeStore(data.statusStore || {});
+  state.selectedKey = "";
+  state.filterPreferencesReady = false;
   const records = (data.records || []).map((record) => ({
     schoolSlug: record.schoolSlug,
     collegeSlug: record.collegeSlug,
@@ -387,6 +399,7 @@ async function loadFromApi() {
     sourcePath: record.sourcePath,
     raw: record.raw || {},
     dblp: record.dblp || [],
+    publication: record.publication || [],
     arxiv: record.arxiv || [],
     web: record.web || [],
     webSearch: record.webSearch || [],
@@ -398,7 +411,51 @@ async function loadFromApi() {
     key: record.key,
   }));
   mergeLoadedRecords(records);
-  showToast(`已从 outputs 加载 ${records.length} 位教师`);
+  if (announce) {
+    showToast(records.length ? `已加载 ${records.length} 位教师` : "该学生画像尚未生成匹配结果");
+  }
+}
+
+async function switchProfile(profileId) {
+  if (!profileId || profileId === state.currentProfileId) return;
+  const previous = state.currentProfileId;
+  els.profileSelector.disabled = true;
+  await state.saveQueue.catch(() => {});
+  if (state.saveFailures) {
+    els.profileSelector.value = previous;
+    els.profileSelector.disabled = state.profiles.length <= 1;
+    showToast("存在未保存的联系记录，请先重试保存后再切换画像");
+    return;
+  }
+  try {
+    await postJson("/api/profile-selection", { profileId });
+    await loadProfileData(profileId);
+  } catch (error) {
+    state.currentProfileId = previous;
+    els.profileSelector.value = previous;
+    showToast(`画像切换失败：${error.message}`);
+  } finally {
+    els.profileSelector.disabled = state.profiles.length <= 1;
+  }
+}
+
+async function loadFromApi() {
+  const sessionResponse = await fetch("/api/session", { cache: "no-store" });
+  if (sessionResponse.status === 404) {
+    throw new Error("当前运行的是旧版看板服务，请关闭旧服务后重新运行 start_viewer.bat");
+  }
+  if (!sessionResponse.ok) throw new Error(`会话初始化失败：${sessionResponse.status}`);
+  const session = await sessionResponse.json();
+  if (Number(session.apiVersion || 0) < 5) {
+    throw new Error("当前运行的是旧版看板服务，请关闭旧服务后重新运行 start_viewer.bat");
+  }
+  state.csrfToken = norm(session.token);
+  if (!state.csrfToken) throw new Error("会话令牌缺失");
+  state.profiles = Array.isArray(session.profiles) ? session.profiles : [];
+  state.currentProfileId = norm(session.defaultProfileId || state.profiles[0]?.profileId);
+  if (!state.currentProfileId) throw new Error("没有可用的本地学生画像");
+  populateProfileSelector();
+  await loadProfileData(state.currentProfileId);
 }
 
 function populateSelect(select, values, allLabel) {
@@ -495,10 +552,11 @@ function compareRecords(a, b) {
 
 function isWeakEvidence(record) {
   const dblp = numberValue(record.raw["DBLP近三年论文数"]);
-  const arxiv = numberValue(record.raw["arXiv近三年论文数"]);
+  const publication = numberValue(record.raw["近五年论文数"]);
+  const arxiv = numberValue(record.raw["arXiv近五年论文数"] || record.raw["arXiv近三年论文数"]);
   const web = numberValue(record.raw["网页证据条数"]);
   const webSearch = numberValue(record.raw["WebSearch证据条数"]);
-  return dblp + arxiv + web + webSearch <= 1;
+  return dblp + publication + arxiv + web + webSearch <= 1;
 }
 
 function searchableText(record) {
@@ -516,6 +574,9 @@ function searchableText(record) {
     row["显式核心锚点"],
     row["评分警告"],
     row["DBLP近三年关键词"],
+    row["近五年关键词"],
+    row["近五年代表论文"],
+    row["主要数学分类"],
     row["arXiv关键词"],
     row["网页关键词"],
     row["WebSearch关键词"],
@@ -668,6 +729,7 @@ function directionViewModel(row) {
   const seen = new Set(matchedKeywords.map(canonicalSignal));
   const sourceGroups = [
     ["DBLP", uniqueSignals([row["DBLP近三年关键词"]], seen)],
+    ["数学文献", uniqueSignals([row["近五年关键词"], row["主要数学分类"]], seen)],
     ["arXiv", uniqueSignals([row["arXiv关键词"]], seen)],
     ["网页", uniqueSignals([row["网页关键词"]], seen)],
     ["搜索补充", uniqueSignals([row["WebSearch关键词"]], seen)],
@@ -1409,6 +1471,7 @@ function scoreBreakdownSection(row) {
   const scoreEntries = [
     ["官方", "官方证据分", ""],
     ["DBLP", "DBLP证据分", row["DBLP匹配置信度"]],
+    ["数学论文", "论文证据分", row["学术作者匹配置信度"]],
     ["arXiv", "arXiv证据分", row["arXiv置信度"]],
     ["网页", "网页证据分", row["网页状态"]],
     ["搜索", "WebSearch证据分", row["WebSearch置信度"]],
@@ -1418,7 +1481,8 @@ function scoreBreakdownSection(row) {
     ? scoreEntries.map(([label, field, meta]) => [label, norm(row[field]) || "0", norm(meta)])
     : [
         ["DBLP论文", norm(row["DBLP近三年论文数"]) || "0", ""],
-        ["arXiv论文", norm(row["arXiv近三年论文数"]) || "0", ""],
+        ["数学论文", norm(row["近五年论文数"]) || "0", ""],
+        ["arXiv论文", norm(row["arXiv近五年论文数"] || row["arXiv近三年论文数"]) || "0", ""],
         ["网页证据", norm(row["网页证据条数"]) || "0", ""],
         ["搜索证据", norm(row["WebSearch证据条数"]) || "0", ""],
       ];
@@ -1571,18 +1635,21 @@ function detailEvidenceSections(record) {
   if (!record.detailsLoaded) return "";
   return [
     evidenceSection("DBLP近三年", record.dblp, ["年份", "venue", "题名", "链接"]),
-    evidenceSection("arXiv近三年", record.arxiv, ["发布日期", "题名", "分类", "链接"]),
+    evidenceSection("数学文献近五年", record.publication, ["来源", "作者身份置信度", "是否计入匹配", "年份", "题名", "分类", "主题", "证据URL"]),
+    evidenceSection("arXiv近年", record.arxiv, ["发布日期", "题名", "分类", "链接"]),
     evidenceSection("网页证据", record.web, ["网页URL", "证据"]),
     evidenceSection("WebSearch证据", record.webSearch, ["WebSearch置信度", "来源类型", "标题", "证据", "关键词", "来源URL"]),
   ].join("");
 }
 
 async function loadRecordDetails(record) {
+  const profileId = state.currentProfileId;
   try {
-    const response = await fetch(`/api/detail?key=${encodeURIComponent(record.key)}`, { cache: "no-store" });
+    const response = await fetch(`/api/detail?profile=${encodeURIComponent(profileId)}&key=${encodeURIComponent(record.key)}`, { cache: "no-store" });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `请求失败：${response.status}`);
     record.dblp = data.dblp || [];
+    record.publication = data.publication || [];
     record.arxiv = data.arxiv || [];
     record.web = data.web || [];
     record.webSearch = data.webSearch || [];
@@ -1592,7 +1659,7 @@ async function loadRecordDetails(record) {
     record.detailsError = error.message || String(error);
   } finally {
     record.detailsLoading = false;
-    if (state.selectedKey === record.key) renderDetail();
+    if (state.currentProfileId === profileId && state.selectedKey === record.key) renderDetail();
   }
 }
 
@@ -1601,6 +1668,8 @@ function linksSection(row) {
     ["教师主页", row["教师主页链接"]],
     ["个人主页", row["个人主页"]],
     ["DBLP作者", row["DBLP作者链接"]],
+    ["zbMATH作者", row["zbMATH作者链接"]],
+    ["OpenAlex作者", row["OpenAlex作者链接"]],
   ].filter(([, url]) => safeUrl(url));
   if (!links.length) return "";
   return `<section id="detailLinks" class="section"><h2>链接</h2><div class="link-list">${links
@@ -1616,8 +1685,8 @@ function evidenceSection(title, rows, fields) {
       .map((field) => norm(row[field]))
       .filter(Boolean)
       .join(" · ");
-    const main = norm(row["题名"] || row["标题"] || row["证据"] || row["链接"] || row["网页URL"] || row["来源URL"]);
-    const link = safeUrl(row["链接"] || row["网页URL"] || row["来源URL"]);
+    const main = norm(row["题名"] || row["标题"] || row["证据"] || row["链接"] || row["证据URL"] || row["网页URL"] || row["来源URL"]);
+    const link = safeUrl(row["链接"] || row["证据URL"] || row["网页URL"] || row["来源URL"]);
     const body = link
       ? `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(main || link)}</a>`
       : escapeHtml(main);
@@ -1627,6 +1696,7 @@ function evidenceSection(title, rows, fields) {
 }
 
 function bindEvents() {
+  els.profileSelector.addEventListener("change", () => switchProfile(els.profileSelector.value));
   els.tablePane.addEventListener("scroll", () => {
     const remaining = els.tablePane.scrollHeight - els.tablePane.scrollTop - els.tablePane.clientHeight;
     if (remaining < 240) appendTableBatch();

@@ -7,6 +7,8 @@ from pathlib import Path
 from zipfile import ZipFile
 from xml.etree import ElementTree
 
+from .profile_registry import create_profile, resolve_profile
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PRIVATE_ROOT = PROJECT_ROOT / "user_private"
@@ -34,15 +36,22 @@ def ensure_private_workspace() -> list[Path]:
     return created
 
 
-def initialize_profile_draft(force: bool = False) -> Path:
+def initialize_profile_draft(force: bool = False, profile_id: str | None = None) -> Path:
     ensure_private_workspace()
-    if DRAFT_PROFILE_PATH.exists() and not force:
-        return DRAFT_PROFILE_PATH
+    draft_path = DRAFT_PROFILE_PATH
+    if profile_id:
+        ref = create_profile(profile_id)
+        draft_path = ref.path.with_name("student_profile.draft.json")
+    if draft_path.exists() and not force:
+        return draft_path
     template = json.loads(PROFILE_TEMPLATE_PATH.read_text(encoding="utf-8"))
     template["_draft_requires_confirmation"] = True
     template["_note"] = "Coding Agent 画像草稿：确认方向、权重和强信号词后，移除草稿标记并保存为 student_profile.json。"
-    DRAFT_PROFILE_PATH.write_text(json.dumps(template, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return DRAFT_PROFILE_PATH
+    if profile_id:
+        template["_profile_id"] = profile_id
+        template["display_name"] = profile_id
+    draft_path.write_text(json.dumps(template, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return draft_path
 
 
 def _extract_pdf(path: Path) -> str:
@@ -82,15 +91,21 @@ def extract_source_text(path: Path) -> str:
     return re.sub(r"[ \t]+", " ", text).strip()
 
 
-def extract_profile_draft(force: bool = False) -> tuple[Path, list[Path]]:
+def extract_profile_draft(force: bool = False, profile_id: str | None = None) -> tuple[Path, list[Path]]:
     ensure_private_workspace()
+    source_dir = SOURCE_DIR
+    draft_path = DRAFT_PROFILE_PATH
+    if profile_id:
+        ref = create_profile(profile_id)
+        source_dir = ref.source_dir
+        draft_path = ref.path.with_name("student_profile.draft.json")
     sources = sorted(
-        path for path in SOURCE_DIR.rglob("*") if path.is_file() and path.suffix.lower() in SUPPORTED_SOURCE_SUFFIXES
+        path for path in source_dir.rglob("*") if path.is_file() and path.suffix.lower() in SUPPORTED_SOURCE_SUFFIXES
     )
     if not sources:
-        raise FileNotFoundError(f"no supported materials found in {SOURCE_DIR}")
-    if DRAFT_PROFILE_PATH.exists() and not force:
-        raise FileExistsError(f"draft already exists: {DRAFT_PROFILE_PATH}; use --force to replace it")
+        raise FileNotFoundError(f"no supported materials found in {source_dir}")
+    if draft_path.exists() and not force:
+        raise FileExistsError(f"draft already exists: {draft_path}; use --force to replace it")
 
     extracted: list[str] = []
     for source in sources:
@@ -109,5 +124,8 @@ def extract_profile_draft(force: bool = False) -> tuple[Path, list[Path]]:
             "resume_match_context": "\n\n".join(extracted)[:50000],
         }
     )
-    DRAFT_PROFILE_PATH.write_text(json.dumps(template, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return DRAFT_PROFILE_PATH, sources
+    if profile_id:
+        template["_profile_id"] = profile_id
+        template["display_name"] = resolve_profile(profile_id, require_exists=False).display_name
+    draft_path.write_text(json.dumps(template, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return draft_path, sources

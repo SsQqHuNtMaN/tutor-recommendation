@@ -8,7 +8,7 @@
 
 - 覆盖目标目录中的教师。
 - 提取姓名、职称、邮箱、教师主页、个人主页、研究方向和简介。
-- 补充近三年 DBLP、arXiv、已知网页和可选 WebSearch 证据。
+- 按目标学科补充论文证据：计算机目标使用 DBLP，数学/统计目标使用官网 publication list、zbMATH Open 和可选 OpenAlex；arXiv、已知网页和可选 WebSearch 继续作为辅助。
 - 输出 `强烈建议`、`可以考虑`、`暂不优先`。
 - 为推荐结论保留可读理由和证据来源。
 
@@ -16,12 +16,14 @@
 
 ## 2. 学生画像
 
-公开仓库不内置真实申请者画像。用户把材料放入 `user_private/source/`，Coding Agent 生成草稿并让用户确认：
+公开仓库不内置真实申请者画像。单画像兼容入口仍是 `user_private/source/`；多画像使用 `user_private/profiles/<profile_id>/source/`。Coding Agent 生成草稿并让用户确认：
 
 ```powershell
 tutor setup
 tutor profile extract
 tutor profile validate
+tutor profile list
+tutor profile use <profile_id>
 ```
 
 画像 JSON 建议包含：
@@ -31,10 +33,11 @@ tutor profile validate
 - `institute_bonus`：院所、实验室或方向单位加分。
 - `high_signal_terms`：足以触发强相关判断的核心词。
 - `concept_alias_groups`：中文、英文、缩写等同义概念组；同组命中只计一次。
+- `excluded_terms`：明确不考虑的方向；命中时给出警告，没有更高优先级官方锚点时不得进入推荐名单。
 
 如果目标画像聚焦具身智能、具身操作或机器人操作，应把 LLM、NLP、信息检索、通用多模态和 Agent 类词设为低权重或零权重。宽泛 AI 词不能替代明确的机器人、操作、抓取、触觉、VLA 等方向证据。
 
-代码优先读取 `user_private/profile/student_profile.json`，兼容旧 `data/private/student_profile.json`，也支持 `--profile PATH` 或 `STUDENT_PROFILE_PATH`。草稿标记未移除、正式画像缺失、JSON 损坏、字段类型错误或核心词没有正权重时都会立即失败；公开模板只能通过 `--demo-profile` 显式启用。
+`--profile` 同时接受已注册的画像 ID 和 JSON 路径。显式参数优先，其次是本地 `active_profile.json`，再回退到旧画像兼容路径。命名画像的工作簿、checkpoint、manifest、cache 和联系状态统一放在 `outputs/by_profile/<profile_id>/`；切换画像不会覆盖另一画像。草稿未确认、正式画像缺失、JSON 损坏、字段类型错误或核心词没有正权重时都会立即失败；公开模板只能通过 `--demo-profile` 显式启用。
 
 ## 3. 目标注册
 
@@ -50,6 +53,8 @@ src/tutor_recommendation/teacher_match_targets.py
 - 学校和学院展示名。
 - 教师目录 URL。
 - DBLP affiliation 关键词。
+- `evidence_profile`：`computer_science`、`mathematics` 或 `mathematics_ai`。
+- `publication_window_years`：该目标的论文证据窗口。
 - 输出目录和文件前缀。
 
 新增目标后，在 `src/tutor_recommendation/first_pass_research.py` 中实现或复用目录/主页解析逻辑，并在 `src/tutor_recommendation/collectors/registry.py` 建立显式绑定。缺失目标由 Coding Agent 按 [Agent 工作流](agent-workflow.md) 接入并补测试。

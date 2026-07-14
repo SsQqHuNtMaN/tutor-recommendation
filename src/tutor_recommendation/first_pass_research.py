@@ -3543,6 +3543,8 @@ def build_workbook(config: TargetConfig, rows: list[dict[str, Any]]) -> None:
         "导师信息库PDF",
         "抓取状态",
         "个人简介摘要",
+        "官方论文列表",
+        "官方论文来源",
     ]
     for col in ordered_cols:
         if col not in df.columns:

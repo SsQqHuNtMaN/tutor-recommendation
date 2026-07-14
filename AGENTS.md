@@ -48,7 +48,9 @@ directory into auditable teacher recommendation workbooks:
 - Start by reading `user_private/request.md` when it exists and inspecting
   `user_private/source/`. Never commit either path's private contents.
 - Generate only a draft profile from source materials. A user-confirmed
-  `user_private/profile/student_profile.json` is required for formal runs.
+  named profile under `user_private/profiles/<profile_id>/student_profile.json`
+  or the legacy `user_private/profile/student_profile.json` is required for
+  formal runs.
 - Check every requested target with `tutor targets --check <target>`. If it is
   missing, follow `docs/agent-workflow.md`: find an official directory, add the
   target and collector binding, add tests, then run the workflow. Do not ask the
@@ -72,8 +74,10 @@ directory into auditable teacher recommendation workbooks:
 - `data/templates/seu_college_affiliations.example.json`: public SEU
   multi-college affiliation override format.
 - `src/tutor_recommendation/student_profile.py`: loads the confirmed profile
-  from `user_private/profile/student_profile.json`, the legacy private path, or
+  selected by the profile registry, the legacy private path, or
   `STUDENT_PROFILE_PATH`.
+- `src/tutor_recommendation/profile_registry.py`: named profile discovery,
+  active selection, and profile-specific output roots.
 - `src/tutor_recommendation/ranking_policy.py`: unified scoring, anchor, and
   recommendation policy used by every research stage.
 - `src/tutor_recommendation/teacher_identity.py`: stable teacher IDs and
@@ -85,6 +89,9 @@ directory into auditable teacher recommendation workbooks:
   collection, target-specific PDF supplements, and first-pass scoring.
 - `src/tutor_recommendation/dblp_research.py`: DBLP author disambiguation and
   recent-paper evidence.
+- `src/tutor_recommendation/publication_adapters.py` and
+  `math_publication_research.py`: source-neutral mathematics publication
+  evidence using official lists, zbMATH Open, and optional OpenAlex.
 - `src/tutor_recommendation/teacher_research_completion.py`: arXiv and known
   webpage evidence completion.
 - `src/tutor_recommendation/supplement_web_search_research.py`: optional
@@ -113,6 +120,8 @@ Prepare the private workspace and extract a draft for user confirmation:
 tutor setup
 tutor profile extract
 tutor profile validate
+tutor profile list
+tutor profile use <profile_id>
 ```
 
 Check target support and run the workflow:
@@ -191,6 +200,8 @@ Typical files:
 
 - `<school_slug>_<college_slug>_teacher_match.xlsx`
 - `<school_slug>_<college_slug>_teacher_match_dblp.xlsx`
+- `<school_slug>_<college_slug>_teacher_match_publications.xlsx` for mathematics
+  evidence profiles
 - `<school_slug>_<college_slug>_teacher_match_full_research.xlsx`
 - `full_research_checkpoint.jsonl`
 - `dblp_cache/`
@@ -198,6 +209,7 @@ Typical files:
 - `web_cache/`
 - optional `pdf_cache/`
 - optional `web_search_cache/`
+- optional `math_publication_cache/`
 
 The dashboard stores manual contact state in `outputs/contact_status.json`.
 Excel workbooks are view/delivery artifacts; JSON is the local editable source
@@ -235,6 +247,12 @@ Valid contact statuses are `已套磁`, `先不考虑`, `不可能`, and `不匹
   official directory, or PDF evidence provides an explicit core direction
   anchor. DBLP-only keyword hits stay auxiliary.
 - DBLP low-confidence or ambiguous matches require manual review.
+- Mathematics targets use official publication lists and zbMATH Open as the
+  primary publication path, with optional OpenAlex when `OPENALEX_API_KEY` is
+  configured. Name-only candidates never affect ranking.
+- Source-neutral publication evidence can strengthen a recommendation only
+  after medium/high author disambiguation and an official core-direction
+  anchor. Missing database records are neutral.
 - arXiv is auxiliary because author-name ambiguity is high.
 - Low-confidence arXiv evidence must not alone produce `强烈建议`.
 - Webpage evidence only confirms known URLs unless the optional web-search

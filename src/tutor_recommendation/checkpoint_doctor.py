@@ -38,11 +38,13 @@ def load_latest_checkpoint(path: Path) -> tuple[dict[str, dict[str, Any]], int, 
 
 
 def audit_target(target: TargetConfig) -> dict[str, Any]:
-    input_path = target.dblp_path
+    input_path = target.evidence_path
     checkpoint_path = target.output_dir / "full_research_checkpoint.jsonl"
     if not input_path.exists():
         raise FileNotFoundError(input_path)
-    context = create_run_context("final", target.key, [input_path])
+    context = create_run_context(
+        "final", target.key, [input_path], recent_year_count=target.publication_window_years
+    )
     df = pd.read_excel(input_path, sheet_name="全量教师名录")
     rows = [ensure_teacher_identity(target.school_slug, target.college_slug, row.to_dict()) for _, row in df.iterrows()]
     checkpoint_by_id, lines, invalid = load_latest_checkpoint(checkpoint_path)

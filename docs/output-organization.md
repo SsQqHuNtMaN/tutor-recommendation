@@ -1,13 +1,19 @@
 # 输出目录组织
 
-本项目的输出按“学校 / 学院”两级归档，避免不同院校的 Excel、checkpoint 和 cache 混在一起。
+本项目的输出按“学生画像 / 学校 / 学院”归档，避免不同画像、院校的 Excel、checkpoint、cache 和联系状态混在一起。
 
 ## 目录规则
 
-统一使用：
+旧画像兼容目录继续使用：
 
 ```text
 outputs/<school_slug>/<college_slug>/
+```
+
+命名画像统一使用：
+
+```text
+outputs/by_profile/<profile_id>/<school_slug>/<college_slug>/
 ```
 
 `school_slug` 和 `college_slug` 使用短小 ASCII 名称，便于 PowerShell、Python 和跨平台工具稳定处理。例如：
@@ -38,7 +44,7 @@ outputs/<school_slug>/<college_slug>/
 
 ## 根层规则
 
-`outputs/` 根层只放学校目录；唯一共享状态例外是 `outputs/contact_status.json`，用于跨学院保存套磁状态、套磁时间、回复情况、约面试时间和回复情况备注。该 JSON 是网页看板编辑的人工状态主源，结构版本为 v4；Excel、checkpoint 和 cache 不放在 `outputs/` 根层。学校目录下只放学院目录。
+旧画像的联系状态保留在 `outputs/contact_status.json`。每个命名画像使用自己的 `outputs/by_profile/<profile_id>/contact_status.json`；它是该画像的人工状态主源，不与其他画像共享。Excel、checkpoint 和 cache 继续放在对应画像的学校/学院目录。
 
 公开文档不记录当前本机已经生成了哪些目标、多少教师或多少证据行。这类运行状态属于本地私有交接资料，应放在 `docs/private/` 或直接从 `outputs/` 查看。
 
@@ -50,10 +56,12 @@ outputs/<school_slug>/<college_slug>/
 outputs/<school_slug>/<college_slug>/
   <school_slug>_<college_slug>_teacher_match.xlsx
   <school_slug>_<college_slug>_teacher_match_dblp.xlsx
+  <school_slug>_<college_slug>_teacher_match_publications.xlsx
   <school_slug>_<college_slug>_teacher_match_full_research.xlsx
   full_research_checkpoint.jsonl
   run_manifest.json
   dblp_cache/
+  math_publication_cache/
   arxiv_cache/
   web_cache/
   pdf_cache/

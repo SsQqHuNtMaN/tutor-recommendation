@@ -9,7 +9,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from tutor_recommendation.first_pass_collectors import build_targets
 from tutor_recommendation.teacher_match_targets import TARGETS, get_target
 
 
@@ -32,8 +31,13 @@ def main() -> None:
     if args.demo_profile and args.profile:
         parser.error("--profile and --demo-profile are mutually exclusive")
     if args.profile:
-        os.environ.pop("TUTOR_ALLOW_TEMPLATE_PROFILE", None)
-        os.environ["STUDENT_PROFILE_PATH"] = args.profile
+        from tutor_recommendation.profile_registry import configure_profile_environment
+
+        configure_profile_environment(args.profile)
+    elif not args.demo_profile:
+        from tutor_recommendation.profile_registry import configure_profile_environment
+
+        configure_profile_environment()
     if args.demo_profile:
         os.environ.pop("STUDENT_PROFILE_PATH", None)
         os.environ["TUTOR_ALLOW_TEMPLATE_PROFILE"] = "1"
@@ -45,6 +49,8 @@ def main() -> None:
 
     for target_key in target_keys:
         get_target(target_key)
+    from tutor_recommendation.first_pass_collectors import build_targets
+
     build_targets(target_keys)
 
 

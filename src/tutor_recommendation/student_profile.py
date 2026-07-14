@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .profile_registry import resolve_profile
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PRIVATE_PROFILE = PROJECT_ROOT / "user_private/profile/student_profile.json"
@@ -51,6 +53,9 @@ class StudentProfile:
     profile_hash: str
     is_demo: bool
     concept_alias_groups: tuple[tuple[str, ...], ...] = ()
+    profile_id: str = "legacy-default"
+    display_name: str = "学生画像"
+    excluded_terms: frozenset[str] = frozenset()
 
 
 class ProfileConfigurationError(RuntimeError):
@@ -86,8 +91,11 @@ def _resolve_configured_profile_path(profile_path: Path | str | None = None) -> 
     configured = profile_path if profile_path is not None else os.environ.get("STUDENT_PROFILE_PATH")
     if not configured:
         return None
-    path = Path(configured).expanduser()
-    return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
+    try:
+        return resolve_profile(configured).path
+    except (FileNotFoundError, ValueError):
+        path = Path(configured).expanduser()
+        return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
 
 
 def _load_profile_data(
@@ -187,6 +195,13 @@ def load_student_profile(
         profile_hash=sha256(canonical.encode("utf-8")).hexdigest(),
         is_demo=is_demo,
         concept_alias_groups=tuple(alias_groups),
+        profile_id=str(raw_data.get("_profile_id") or "legacy-default").strip() or "legacy-default",
+        display_name=str(raw_data.get("display_name") or "学生画像").strip() or "学生画像",
+        excluded_terms=frozenset(
+            str(term).strip().lower()
+            for term in raw_data.get("excluded_terms", [])
+            if str(term).strip()
+        ),
     )
 
 
@@ -200,3 +215,5 @@ CORE_TERMS = PROFILE.high_signal_terms
 PROFILE_HASH = PROFILE.profile_hash
 PROFILE_SOURCE = PROFILE.source_path
 PROFILE_IS_DEMO = PROFILE.is_demo
+PROFILE_ID = PROFILE.profile_id
+PROFILE_DISPLAY_NAME = PROFILE.display_name

@@ -31,6 +31,7 @@ from .ranking_policy import POLICY_VERSION, evaluate_teacher, legacy_dblp_eviden
 from .teacher_identity import TEACHER_ID_COLUMN, ensure_teacher_identity, teacher_record_key
 from .cache_utils import configured_max_age_days, read_cached_text
 from .run_manifest import (
+    assert_stage_profile_compatible,
     RunContext,
     checkpoint_fingerprint,
     context_source_rows,
@@ -38,13 +39,20 @@ from .run_manifest import (
     recent_years,
     write_stage_manifest,
 )
+from .profile_registry import configured_output_root
 
 
 SCHOOL_SLUG = os.environ.get("SCHOOL_SLUG", "sjtu")
 COLLEGE_SLUG = os.environ.get("COLLEGE_SLUG", "cs")
-OUTPUT_DIR = Path("outputs") / SCHOOL_SLUG / COLLEGE_SLUG
+EVIDENCE_PROFILE = os.environ.get("EVIDENCE_PROFILE", "computer_science")
+PUBLICATION_WINDOW_YEARS = max(1, int(os.environ.get("PUBLICATION_WINDOW_YEARS", "3")))
+IS_MATH_EVIDENCE = EVIDENCE_PROFILE in {"mathematics", "mathematics_ai"}
+ARXIV_WINDOW_LABEL = f"近{PUBLICATION_WINDOW_YEARS}年"
+ARXIV_COUNT_COLUMN = f"arXiv{ARXIV_WINDOW_LABEL}论文数"
+ARXIV_DETAIL_SHEET = f"arXiv{ARXIV_WINDOW_LABEL}明细"
+OUTPUT_DIR = configured_output_root() / SCHOOL_SLUG / COLLEGE_SLUG
 OUTPUT_PREFIX = f"{SCHOOL_SLUG}_{COLLEGE_SLUG}_teacher_match"
-INPUT_PATH = OUTPUT_DIR / f"{OUTPUT_PREFIX}_dblp.xlsx"
+INPUT_PATH = OUTPUT_DIR / f"{OUTPUT_PREFIX}_{'publications' if IS_MATH_EVIDENCE else 'dblp'}.xlsx"
 OUTPUT_PATH = OUTPUT_DIR / f"{OUTPUT_PREFIX}_full_research.xlsx"
 CHECKPOINT_PATH = OUTPUT_DIR / "full_research_checkpoint.jsonl"
 ARXIV_CACHE = OUTPUT_DIR / "arxiv_cache"
@@ -65,7 +73,7 @@ VENUE_PATTERN = re.compile(
     r"TPAMI|T-PAMI|IJCV|TRO|T-RO|TASE|T-ASE|TMM|TMI|MICCAI|MobiCom|OSDI)\b",
     re.I,
 )
-RECENT_YEARS = set(recent_years())
+RECENT_YEARS = set(recent_years(count=PUBLICATION_WINDOW_YEARS))
 YEAR_PATTERN = re.compile(rf"\b({'|'.join(sorted(RECENT_YEARS))})\b")
 DBLP_SCORE_CAP = 120
 ILLEGAL_EXCEL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
@@ -157,10 +165,15 @@ def fetch_with_curl(url: str, cache_dir: Path, suffix: str, timeout: int = 25) -
 
 
 def load_dblp_detail_sheet() -> pd.DataFrame:
-    """Carry DBLP publication details from stage 2 into the final workbook."""
+    """Carry stage-2 publication details into the final workbook."""
     if not INPUT_PATH.exists():
         return pd.DataFrame()
-    for sheet_name in ("DBLP近三年论文明细", "DBLP近三年明细"):
+    sheet_names = (
+        ("数学文献近五年明细",)
+        if IS_MATH_EVIDENCE
+        else ("DBLP近三年论文明细", "DBLP近三年明细")
+    )
+    for sheet_name in sheet_names:
         try:
             return pd.read_excel(INPUT_PATH, sheet_name=sheet_name)
         except ValueError:
@@ -292,7 +305,7 @@ def query_arxiv(row: pd.Series) -> dict[str, Any]:
     entries = sorted(dedup.values(), key=lambda item: item["published"], reverse=True)
 
     if not entries:
-        status = "无近三年arXiv命中"
+        status = f"无{ARXIV_WINDOW_LABEL}arXiv命中"
         if errors and not totals:
             status = "arXiv查询失败"
         return {"状态": status, "错误": unique_join(errors), "论文": [], "总命中": max(totals or [0])}
@@ -413,7 +426,7 @@ def should_deep_query(row: pd.Series) -> bool:
     except Exception:
         pass
     try:
-        if float(row.get("DBLP近三年论文数") or 0) > 0:
+        if float(row.get("近五年论文数") or row.get("DBLP近三年论文数") or 0) > 0:
             return True
     except Exception:
         pass
@@ -421,7 +434,10 @@ def should_deep_query(row: pd.Series) -> bool:
         return True
     text = " ".join(
         norm_text(row.get(col))
-        for col in ["命中关键词", "研究方向", "个人简介摘要", "综合研究方向（主页+DBLP）", "DBLP近三年关键词"]
+        for col in [
+            "命中关键词", "研究方向", "个人简介摘要", "综合研究方向（主页+DBLP）",
+            "DBLP近三年关键词", "近五年关键词", "近五年代表论文",
+        ]
     )
     return bool(RELEVANT_PATTERN.search(text))
 
@@ -431,6 +447,7 @@ def prepare_web_search_columns_for_restore(df: pd.DataFrame) -> pd.DataFrame:
         if column == "WebSearch证据条数":
             if column not in df.columns:
                 df[column] = 0
+            df[column] = df[column].astype("object")
             continue
         if column not in df.columns:
             df[column] = pd.Series("", index=df.index, dtype="object")
@@ -453,6 +470,13 @@ def update_recommendation(row: pd.Series, arxiv: dict[str, Any], web: dict[str, 
     decision = evaluate_teacher(
         row,
         dblp=legacy_dblp_evidence(row),
+        publication={
+            "status": row.get("学术作者匹配状态", ""),
+            "confidence": row.get("学术作者匹配置信度", ""),
+            "keywords": row.get("近五年关键词", ""),
+            "titles": row.get("近五年代表论文", ""),
+            "classifications": row.get("主要数学分类", ""),
+        },
         arxiv=arxiv,
         web=web,
     )
@@ -618,7 +642,7 @@ def merge_current_row_with_checkpoint(row: pd.Series, item: dict[str, Any]) -> d
             "arXiv状态": arxiv.get("状态", ""),
             "arXiv置信度": arxiv.get("置信度", ""),
             "arXiv总命中": arxiv.get("总命中", ""),
-            "arXiv近三年论文数": len(arxiv.get("论文", [])),
+            ARXIV_COUNT_COLUMN: len(arxiv.get("论文", [])),
             "arXiv关键词": arxiv.get("关键词", ""),
             "arXiv代表论文": summarize_entries(arxiv.get("论文", []), "arxiv"),
             "arXiv错误": arxiv.get("错误", ""),
@@ -644,7 +668,15 @@ def require_complete_checkpoint_coverage(valid: int, total: int, allow_partial: 
 def main() -> None:
     if not INPUT_PATH.exists():
         raise FileNotFoundError(INPUT_PATH)
-    run_context = create_run_context("final", f"{SCHOOL_SLUG}_{COLLEGE_SLUG}", [INPUT_PATH])
+    run_context = create_run_context(
+        "final",
+        f"{SCHOOL_SLUG}_{COLLEGE_SLUG}",
+        [INPUT_PATH],
+        recent_year_count=PUBLICATION_WINDOW_YEARS,
+    )
+    assert_stage_profile_compatible(
+        OUTPUT_DIR, "math_publications" if IS_MATH_EVIDENCE else "dblp", run_context
+    )
     df = pd.read_excel(INPUT_PATH, sheet_name="全量教师名录")
     df = pd.DataFrame(
         ensure_teacher_identity(SCHOOL_SLUG, COLLEGE_SLUG, row.to_dict())
@@ -682,7 +714,7 @@ def main() -> None:
                 "arXiv状态": arxiv.get("状态", ""),
                 "arXiv置信度": arxiv.get("置信度", ""),
                 "arXiv总命中": arxiv.get("总命中", ""),
-                "arXiv近三年论文数": len(arxiv.get("论文", [])),
+                ARXIV_COUNT_COLUMN: len(arxiv.get("论文", [])),
                 "arXiv关键词": arxiv.get("关键词", ""),
                 "arXiv代表论文": summarize_entries(arxiv.get("论文", []), "arxiv"),
                 "arXiv错误": arxiv.get("错误", ""),
@@ -755,7 +787,7 @@ def main() -> None:
                     "arXiv状态": "未深检索-时间/同名风险",
                     "arXiv置信度": "",
                     "arXiv总命中": "",
-                    "arXiv近三年论文数": 0,
+                    ARXIV_COUNT_COLUMN: 0,
                     "arXiv关键词": "",
                     "arXiv代表论文": "",
                     "arXiv错误": "",
@@ -797,6 +829,13 @@ def main() -> None:
             policy_update = evaluate_teacher(
                 row,
                 dblp=legacy_dblp_evidence(row),
+                publication={
+                    "status": row.get("学术作者匹配状态", ""),
+                    "confidence": row.get("学术作者匹配置信度", ""),
+                    "keywords": row.get("近五年关键词", ""),
+                    "titles": row.get("近五年代表论文", ""),
+                    "classifications": row.get("主要数学分类", ""),
+                },
                 arxiv=arxiv,
                 web=web,
                 web_search=web_search,
@@ -835,7 +874,10 @@ def main() -> None:
 
     source_rows = [
         {"项目": "更新日期", "内容": TODAY},
-        {"项目": "DBLP来源", "内容": SOURCE_LINKS["DBLP"]},
+        {
+            "项目": "论文证据来源",
+            "内容": "教师官网 + zbMATH Open + OpenAlex" if IS_MATH_EVIDENCE else SOURCE_LINKS["DBLP"],
+        },
         {"项目": "arXiv来源", "内容": SOURCE_LINKS["arXiv"]},
         {"项目": "教师主页来源", "内容": SOURCE_LINKS["教师名录"]},
     ]
@@ -844,12 +886,18 @@ def main() -> None:
     source_rows.extend(
         [
             {
-                "项目": "近三年口径",
-                "内容": "DBLP与arXiv按年份字段取" + "/".join(sorted(RECENT_YEARS)) + "；网页证据按相同年份窗口或顶会/期刊关键词抽取。",
+                "项目": "近年论文口径",
+                "内容": ("数学文献与arXiv" if IS_MATH_EVIDENCE else "DBLP与arXiv")
+                + "按年份字段取" + "/".join(sorted(RECENT_YEARS))
+                + "；网页证据按相同年份窗口或领域关键词抽取。",
             },
             {
                 "项目": "消歧说明",
-                "内容": "DBLP高置信优先；arXiv只有作者名，常见姓名标为低置信并仅作辅助；个人/实验室主页作为web证据补充方向和发表线索。",
+                "内容": (
+                    "数学文献先以官网、ORCID、机构和论文题名交叉消歧；未达到中高置信度不进入评分。"
+                    if IS_MATH_EVIDENCE
+                    else "DBLP高置信优先；arXiv只有作者名，常见姓名标为低置信并仅作辅助；个人/实验室主页作为web证据补充方向和发表线索。"
+                ),
             },
         ]
     )
@@ -866,8 +914,12 @@ def main() -> None:
     with pd.ExcelWriter(OUTPUT_PATH, engine="openpyxl") as writer:
         priority.to_excel(writer, sheet_name="优先套磁名单", index=False)
         out.to_excel(writer, sheet_name="全量教师名录", index=False)
-        dblp_detail.to_excel(writer, sheet_name="DBLP近三年明细", index=False)
-        arxiv_detail_df.to_excel(writer, sheet_name="arXiv近三年明细", index=False)
+        dblp_detail.to_excel(
+            writer,
+            sheet_name="数学文献近五年明细" if IS_MATH_EVIDENCE else "DBLP近三年明细",
+            index=False,
+        )
+        arxiv_detail_df.to_excel(writer, sheet_name=ARXIV_DETAIL_SHEET, index=False)
         web_detail_df.to_excel(writer, sheet_name="网页证据明细", index=False)
         if not web_search_detail_df.empty:
             web_search_detail_df.to_excel(writer, sheet_name="WebSearch证据明细", index=False)
@@ -878,24 +930,18 @@ def main() -> None:
     write_stage_manifest(OUTPUT_DIR, run_context)
     print(f"rows={len(out)}")
     print(f"priority={len(priority)}")
-    print(f"dblp_entries={len(dblp_detail)}")
+    print(f"publication_entries={len(dblp_detail)}")
     print(f"arxiv_entries={len(arxiv_rows)}")
     print(f"web_evidence={len(web_rows)}")
     print(f"output={OUTPUT_PATH.resolve()}")
     print(out["推荐等级"].value_counts().to_string())
     print(
         priority[
-            [
-                "姓名",
-                "职称",
-                "推荐等级",
-                "匹配分",
-                "DBLP近三年论文数",
-                "arXiv近三年论文数",
-                "网页证据条数",
-                "命中关键词",
-                "教师主页链接",
-            ]
+            [column for column in [
+                "姓名", "职称", "推荐等级", "匹配分",
+                "近五年论文数" if IS_MATH_EVIDENCE else "DBLP近三年论文数",
+                ARXIV_COUNT_COLUMN, "网页证据条数", "命中关键词", "教师主页链接",
+            ] if column in priority.columns]
         ]
         .head(30)
         .to_string(index=False)

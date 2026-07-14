@@ -18,6 +18,7 @@ COLLECTOR_BY_TARGET: dict[str, str] = {
     "ruc_gsai": "fetch_ruc_gsai_directory",
     "ruc_ssai": "fetch_ruc_ssai_directory",
     "ruc_info": "fetch_ruc_info_directory",
+    "ruc_isbd": "tutor_recommendation.collectors.ruc_isbd:fetch_ruc_isbd_directory",
     "nju_ra": "fetch_nju_ra_directory",
     "nju_is": "fetch_nju_is_directory",
     "nju_ic": "fetch_nju_ic_directory",

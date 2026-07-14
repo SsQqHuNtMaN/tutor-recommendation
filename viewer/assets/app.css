@@ -22,6 +22,32 @@
   gap: 16px;
 }
 
+.profile-switcher {
+  min-width: 210px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.profile-switcher select {
+  width: min(260px, 28vw);
+  height: 30px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 28px 0 9px;
+  font-weight: 650;
+}
+
+.profile-switcher select:disabled {
+  color: var(--muted);
+  background: #f1f4f5;
+}
+
 .title-block {
   display: flex;
   align-items: baseline;
@@ -1662,6 +1688,15 @@ a:hover {
     height: auto;
     align-items: flex-start;
     flex-wrap: wrap;
+  }
+
+  .profile-switcher {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .profile-switcher select {
+    width: min(320px, 65vw);
   }
 
   .title-block {

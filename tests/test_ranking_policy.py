@@ -35,6 +35,21 @@ ALIAS_PROFILE = StudentProfile(
 
 
 class RankingPolicyTests(unittest.TestCase):
+    def test_profile_excluded_direction_is_reported_and_not_prioritized(self) -> None:
+        profile = StudentProfile(
+            resume_match_context="optimization for learning",
+            keyword_weights=[("convex optimization", 10)],
+            institute_bonus=[],
+            high_signal_terms={"convex optimization"},
+            source_path=Path("excluded-profile.json"),
+            profile_hash="excluded-profile",
+            is_demo=False,
+            excluded_terms=frozenset({"functional analysis"}),
+        )
+        decision = evaluate_teacher({"研究方向": "functional analysis"}, profile=profile)
+        self.assertEqual(decision.level, "暂不优先")
+        self.assertTrue(any("排除方向" in warning for warning in decision.warnings))
+
     def test_zero_weight_never_scores(self) -> None:
         score, keywords = score_text("LLM and large models", profile=PROFILE)
         self.assertEqual(score, 0)
@@ -101,6 +116,25 @@ class RankingPolicyTests(unittest.TestCase):
             dblp={"confidence": "中", "keywords": "robot manipulation"},
         )
         self.assertEqual(base.score, medium.score)
+
+    def test_confirmed_math_publications_only_enhance_an_official_anchor(self) -> None:
+        evidence = {
+            "status": "official:success; zbmath:success/medium",
+            "confidence": "medium",
+            "keywords": "robot manipulation",
+            "titles": "Reliable Robot Manipulation",
+            "classifications": "90C25",
+        }
+        anchored = {"研究方向": "robot manipulation"}
+        base = evaluate_teacher(anchored, profile=PROFILE)
+        enhanced = evaluate_teacher(anchored, profile=PROFILE, publication=evidence)
+        self.assertGreater(enhanced.score, base.score)
+        self.assertGreater(enhanced.breakdown["publication"], 0)
+
+        unanchored = {"研究方向": "computer science"}
+        decision = evaluate_teacher(unanchored, profile=PROFILE, publication=evidence)
+        self.assertEqual(decision.breakdown["publication"], 0)
+        self.assertEqual(decision.can_contact, "否")
 
 
 if __name__ == "__main__":

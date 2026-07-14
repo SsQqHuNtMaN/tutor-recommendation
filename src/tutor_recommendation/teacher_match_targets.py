@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .profile_registry import configured_output_root
+
 
 @dataclass(frozen=True)
 class TargetConfig:
@@ -15,10 +17,12 @@ class TargetConfig:
     affiliation_keywords: tuple[str, ...]
     dedup_priority: int = 100
     cross_target_overlap_group: str = ""
+    evidence_profile: str = "computer_science"
+    publication_window_years: int = 3
 
     @property
     def output_dir(self) -> Path:
-        return Path("outputs") / self.school_slug / self.college_slug
+        return configured_output_root() / self.school_slug / self.college_slug
 
     @property
     def output_prefix(self) -> str:
@@ -35,6 +39,16 @@ class TargetConfig:
     @property
     def dblp_path(self) -> Path:
         return self.output_dir / f"{self.output_prefix}_dblp.xlsx"
+
+    @property
+    def publication_path(self) -> Path:
+        return self.output_dir / f"{self.output_prefix}_publications.xlsx"
+
+    @property
+    def evidence_path(self) -> Path:
+        if self.evidence_profile in {"mathematics", "mathematics_ai"}:
+            return self.publication_path
+        return self.dblp_path
 
     @property
     def final_path(self) -> Path:
@@ -108,6 +122,22 @@ TARGETS: dict[str, TargetConfig] = {
         college_name="信息学院",
         directory_url="http://info.ruc.edu.cn/jsky/szdw/ajxjgcx/bx/bx1/index.htm",
         affiliation_keywords=("renmin university", "ruc", "school of information", "information school"),
+    ),
+    "ruc_isbd": TargetConfig(
+        key="ruc_isbd",
+        school_slug="ruc",
+        college_slug="isbd",
+        school_name="中国人民大学",
+        college_name="统计与大数据研究院",
+        directory_url="http://isbd.ruc.edu.cn/sztd/index.htm",
+        affiliation_keywords=(
+            "renmin university",
+            "ruc",
+            "institute of statistics and big data",
+            "school of statistics",
+        ),
+        evidence_profile="mathematics_ai",
+        publication_window_years=5,
     ),
     "nju_ra": TargetConfig(
         key="nju_ra",

@@ -17,6 +17,9 @@ def configure_target(target_key: str) -> None:
     os.environ["SCHOOL_SLUG"] = target.school_slug
     os.environ["COLLEGE_SLUG"] = target.college_slug
     os.environ["FACULTY_SOURCE_URL"] = target.directory_url
+    os.environ["TARGET_KEY"] = target.key
+    os.environ["EVIDENCE_PROFILE"] = target.evidence_profile
+    os.environ["PUBLICATION_WINDOW_YEARS"] = str(target.publication_window_years)
     if target_key == "zju_cs":
         os.environ["FACULTY_PDF_SOURCE_URL"] = "http://www.cs.zju.edu.cn/csen/2021/0525/c27006a2377953/page.htm"
 
@@ -42,8 +45,13 @@ def main() -> None:
     if args.demo_profile and args.profile:
         parser.error("--profile and --demo-profile are mutually exclusive")
     if args.profile:
-        os.environ.pop("TUTOR_ALLOW_TEMPLATE_PROFILE", None)
-        os.environ["STUDENT_PROFILE_PATH"] = args.profile
+        from tutor_recommendation.profile_registry import configure_profile_environment
+
+        configure_profile_environment(args.profile)
+    elif not args.demo_profile:
+        from tutor_recommendation.profile_registry import configure_profile_environment
+
+        configure_profile_environment()
     if args.demo_profile:
         os.environ.pop("STUDENT_PROFILE_PATH", None)
         os.environ["TUTOR_ALLOW_TEMPLATE_PROFILE"] = "1"

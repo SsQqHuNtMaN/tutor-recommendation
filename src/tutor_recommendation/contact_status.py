@@ -7,6 +7,8 @@ from typing import Any
 
 import pandas as pd
 
+from .profile_registry import configured_output_root
+
 from .teacher_identity import TEACHER_ID_COLUMN, teacher_record_key
 
 
@@ -21,6 +23,10 @@ VALID_CONTACT_STATUSES = ["已套磁", "先不考虑", "不可能", "不匹配"]
 LEGACY_STATUS_ALIASES = {"不考虑": "先不考虑"}
 DEFAULT_CONTACT_RESPONSES = ["已发", "官回", "添加微信", "约面试", "考核", "已满"]
 CONTACT_STATUS_PATH = Path("outputs") / "contact_status.json"
+
+
+def current_contact_status_path() -> Path:
+    return configured_output_root() / "contact_status.json"
 TEACHER_SUMMARY_SHEETS = {"优先套磁名单", "全量教师名录"}
 
 
@@ -192,7 +198,8 @@ def normalize_contact_entry(value: Any) -> dict[str, Any]:
     return entry
 
 
-def load_status_store(path: Path = CONTACT_STATUS_PATH) -> dict[str, Any]:
+def load_status_store(path: Path | None = None) -> dict[str, Any]:
+    path = path or current_contact_status_path()
     if not path.exists():
         return empty_store()
     try:
@@ -203,7 +210,8 @@ def load_status_store(path: Path = CONTACT_STATUS_PATH) -> dict[str, Any]:
     return normalize_status_store(data)
 
 
-def save_status_store(store: dict[str, Any], path: Path = CONTACT_STATUS_PATH) -> None:
+def save_status_store(store: dict[str, Any], path: Path | None = None) -> None:
+    path = path or current_contact_status_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     store = normalize_status_store(store)
     store["updated_at"] = datetime.now().isoformat(timespec="seconds")
@@ -345,7 +353,7 @@ def apply_contact_statuses(
     loaded_from_default = store is None
     store = store if store is not None else load_status_store()
     if authoritative is None:
-        authoritative = loaded_from_default and CONTACT_STATUS_PATH.exists()
+        authoritative = loaded_from_default and current_contact_status_path().exists()
     values: dict[str, list[str]] = {column: [] for column in CONTACT_COLUMNS}
     for _, row in df.iterrows():
         key = row_key(school_slug, college_slug, row)

@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from .student_profile import PROFILE, StudentProfile
 
 
-POLICY_VERSION = "2026.07.11-p1"
+POLICY_VERSION = "2026.07.14-multi-profile-publications"
 SCHEMA_VERSION = 3
 CONSIDER_THRESHOLD = 24
 STRONG_THRESHOLD = 44
@@ -135,6 +135,7 @@ class RankingDecision:
             "评分规则版本": POLICY_VERSION,
             "官方证据分": self.breakdown.get("official", 0),
             "DBLP证据分": self.breakdown.get("dblp", 0),
+            "论文证据分": self.breakdown.get("publication", 0),
             "arXiv证据分": self.breakdown.get("arxiv", 0),
             "网页证据分": self.breakdown.get("web", 0),
             "WebSearch证据分": self.breakdown.get("web_search", 0),
@@ -180,11 +181,13 @@ def evaluate_teacher(
     *,
     profile: StudentProfile = PROFILE,
     dblp: dict[str, Any] | None = None,
+    publication: dict[str, Any] | None = None,
     arxiv: dict[str, Any] | None = None,
     web: dict[str, Any] | None = None,
     web_search: dict[str, Any] | None = None,
 ) -> RankingDecision:
     dblp = dblp or {}
+    publication = publication or {}
     arxiv = arxiv or {}
     web = web or {}
     web_search = web_search or {}
@@ -192,14 +195,26 @@ def evaluate_teacher(
     explicit_text = _explicit_anchor_text(row)
     official_text = _row_text(row, OFFICIAL_CONTEXT_COLUMNS)
     explicit_core = _core_matches(explicit_text, profile)
+    excluded_matches = sorted(
+        term for term in profile.excluded_terms if keyword_in_text(term, official_text.lower())
+    )
     official_score, official_keywords = score_text(official_text, profile=profile)
     bonus_score, bonus_keywords = _institute_bonus(row, profile)
     official_score = min(official_score + (bonus_score if explicit_core else 0), 80)
 
-    breakdown = {"official": official_score, "dblp": 0, "arxiv": 0, "web": 0, "web_search": 0}
+    breakdown = {
+        "official": official_score,
+        "dblp": 0,
+        "publication": 0,
+        "arxiv": 0,
+        "web": 0,
+        "web_search": 0,
+    }
     matched = list(official_keywords) + bonus_keywords
     reasons: list[str] = []
     warnings: list[str] = []
+    if excluded_matches:
+        warnings.append(f"当前画像排除方向命中：{unique_join(excluded_matches[:4])}")
 
     dblp_confidence = _confidence(dblp.get("confidence") or row.get("DBLP匹配置信度", ""))
     dblp_text = " ".join(
@@ -216,6 +231,29 @@ def evaluate_teacher(
             reasons.append("高置信DBLP近三年论文增强了已确认的核心方向")
     elif dblp_raw:
         warnings.append("DBLP存在相关词，但身份置信度或官方核心锚点不足，未计入排名")
+
+    publication_confidence = _confidence(
+        publication.get("confidence") or row.get("学术作者匹配置信度", "")
+    )
+    publication_status = norm_text(
+        publication.get("status") or row.get("学术作者匹配状态", "")
+    ).lower()
+    publication_text = " ".join(
+        [
+            norm_text(publication.get("keywords") or row.get("近五年关键词", "")),
+            norm_text(publication.get("titles") or row.get("近五年代表论文", "")),
+            norm_text(publication.get("classifications") or row.get("主要数学分类", "")),
+        ]
+    )
+    publication_raw, publication_keywords = score_text(publication_text, profile=profile, max_terms=8)
+    publication_confirmed = publication_confidence in {"high", "medium", "高", "中"} and "success" in publication_status
+    if explicit_core and publication_confirmed:
+        breakdown["publication"] = min(round(publication_raw * 0.35), 18)
+        matched.extend(publication_keywords)
+        if breakdown["publication"]:
+            reasons.append("经身份消歧确认的近年数学论文增强了官网核心方向")
+    elif publication_raw:
+        warnings.append("数学论文存在相关词，但作者身份或官方核心锚点不足，未计入排名")
 
     arxiv_confidence = _confidence(arxiv.get("置信度") or row.get("arXiv置信度", ""))
     arxiv_text = " ".join(
@@ -266,7 +304,13 @@ def evaluate_teacher(
         warnings.append("自动WebSearch仅用于发现来源，未直接影响排名")
 
     score = sum(breakdown.values())
-    if not explicit_core:
+    excluded_without_primary = bool(excluded_matches) and not explicit_core
+    if excluded_without_primary:
+        score = min(score, CONSIDER_THRESHOLD - 1)
+        level = "暂不优先"
+        can_contact = "否"
+        reasons.append("教师当前方向命中画像明确排除的方向，且缺少更高优先级核心锚点")
+    elif not explicit_core:
         score = min(score, CONSIDER_THRESHOLD - 1)
         level = "暂不优先"
         can_contact = "否"
@@ -308,6 +352,16 @@ def legacy_dblp_evidence(row: Any, summary: dict[str, Any] | None = None, match:
     }
 
 
+def legacy_publication_evidence(row: Any) -> dict[str, Any]:
+    return {
+        "status": row.get("学术作者匹配状态", ""),
+        "confidence": row.get("学术作者匹配置信度", ""),
+        "keywords": row.get("近五年关键词", ""),
+        "titles": row.get("近五年代表论文", ""),
+        "classifications": row.get("主要数学分类", ""),
+    }
+
+
 def evaluate_legacy_row(
     row: Any,
     *,
@@ -334,6 +388,7 @@ def evaluate_legacy_row(
         row,
         profile=profile,
         dblp=legacy_dblp_evidence(row),
+        publication=legacy_publication_evidence(row),
         arxiv=arxiv,
         web=web,
         web_search=web_search,

@@ -21,6 +21,7 @@ TARGET_BUILDERS: dict[str, Callable[[], None]] = {
     "ruc_gsai": lambda: _build_configured_target("ruc_gsai"),
     "ruc_ssai": lambda: _build_configured_target("ruc_ssai"),
     "ruc_info": lambda: _build_configured_target("ruc_info"),
+    "ruc_isbd": lambda: _build_configured_target("ruc_isbd"),
     "nju_ra": lambda: _build_configured_target("nju_ra"),
     "nju_is": lambda: _build_configured_target("nju_is"),
     "nju_ic": lambda: _build_configured_target("nju_ic"),

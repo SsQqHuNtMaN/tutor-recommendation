@@ -37,6 +37,18 @@ tutor profile extract
 tutor profile validate
 ```
 
+需要为不同申请方向建立独立画像时使用命名画像：
+
+```powershell
+tutor profile create math-ai --display-name "数学 × AI"
+tutor profile extract math-ai
+tutor profile validate math-ai
+tutor profile use math-ai
+tutor profile list
+```
+
+命名画像材料位于 `user_private/profiles/<profile_id>/`，结果和联系状态位于 `outputs/by_profile/<profile_id>/`。Viewer 标题栏可手动切换；切换不会把另一画像的工作簿或联系状态加载进来。
+
 也可以用环境变量指定其他画像：
 
 ```powershell
@@ -46,7 +58,7 @@ $env:STUDENT_PROFILE_PATH='D:\path\to\student_profile.json'
 统一入口也支持：
 
 ```powershell
-tutor run <target> --profile 'D:\path\to\student_profile.json'
+tutor run <target> --profile <profile_id-or-json-path>
 tutor run <target> --demo-profile
 ```
 
@@ -71,7 +83,7 @@ tutor targets --check <target>
 
 ## 4. 三阶段流程
 
-Agent 的常规入口会依次运行目录/主页、DBLP、arXiv/网页三个阶段：
+Agent 的常规入口会依次运行目录/主页、学科论文证据、arXiv/网页三个阶段。`tutor run` 根据 target 的 `evidence_profile` 自动选择 DBLP 或数学文献适配器：
 
 ```powershell
 tutor run <target>
@@ -82,6 +94,7 @@ tutor run <target>
 ```powershell
 python scripts/legacy/build_teacher_match.py <target>
 python scripts/legacy/update_teacher_match_with_dblp.py <target>
+python scripts/legacy/update_teacher_match_with_math_publications.py <target>
 python scripts/legacy/complete_teacher_research.py <target>
 ```
 
@@ -92,6 +105,8 @@ outputs/<school_slug>/<college_slug>/<school_slug>_<college_slug>_teacher_match.
 outputs/<school_slug>/<college_slug>/<school_slug>_<college_slug>_teacher_match_dblp.xlsx
 outputs/<school_slug>/<college_slug>/<school_slug>_<college_slug>_teacher_match_full_research.xlsx
 ```
+
+命名画像把同一结构放在 `outputs/by_profile/<profile_id>/` 下。数学目标的第二阶段文件使用 `_publications.xlsx`，明细表为 `数学文献近五年明细`；作者身份未达到中高置信度或缺少官方方向锚点时，论文命中不能改变推荐等级。
 
 如果同一学校有多个重叠学院或多院导师库，应把这些目标放在同一条第一阶段命令里运行，这样会启用跨目标去重：
 
