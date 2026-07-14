@@ -57,7 +57,7 @@ src/tutor_recommendation/teacher_match_targets.py
 - `publication_window_years`：该目标的论文证据窗口。
 - 输出目录和文件前缀。
 
-新增目标后，在 `src/tutor_recommendation/first_pass_research.py` 中实现或复用目录/主页解析逻辑，并在 `src/tutor_recommendation/collectors/registry.py` 建立显式绑定。缺失目标由 Coding Agent 按 [Agent 工作流](agent-workflow.md) 接入并补测试。
+新增目标后，在 `src/tutor_recommendation/collectors/` 中实现或复用目录/主页解析逻辑，并在 `collectors/registry.py` 建立显式绑定。兼容期 `first_pass_research.py` 只负责编排和尚未迁移的旧解析器。缺失目标由 Coding Agent 按 [Agent 工作流](agent-workflow.md) 接入并补测试。
 
 ## 4. 第一阶段：目录与主页
 
@@ -146,7 +146,7 @@ tutor run seu_cse seu_software seu_ai
 - 教师级导师库可补充研究方向、团队和邮箱等字段。
 - 团队 PDF 应作为团队级工作内容证据，按教师姓名或团队名谨慎映射。
 - PDF 证据应保留来源 URL，方便人工复核。
-- PDF 方向可以参与第一阶段打分，但仍需结合主页、DBLP、arXiv 和网页证据判断。
+- PDF 方向可以参与第一阶段打分，但仍需结合主页、学科论文、arXiv 和网页证据判断。
 
 ## 7. DBLP 证据
 
@@ -179,7 +179,19 @@ data/templates/dblp_overrides.example.json
 
 只有高置信 DBLP 作者匹配可以参与排名，并且仍要求官方方向锚点。仅 affiliation 相符、全局姓名 override 或候选间差距不足时保持中/低置信，只作辅助并要求人工复核。
 
-## 8. arXiv 与已知网页证据
+## 8. 数学与统计论文证据
+
+`mathematics` 和 `mathematics_ai` target 使用来源中立的第二阶段：
+
+```powershell
+python scripts/legacy/update_teacher_match_with_math_publications.py <target>
+```
+
+证据优先级是官方 publication list、zbMATH Open、可选 OpenAlex。官方页面提供身份与方向锚点；开放数据库用于补全配置窗口内的题名、年份、DOI、MSC/topic 和来源。作者必须通过 ORCID、机构、官网题名/DOI 重合等信号达到中高置信；只有姓名的候选不计分。数据库无记录保持中性，引用数、h-index 和论文数量不直接参与推荐。
+
+`mathematics_ai` 额外区分数学/统计核心匹配和 AI 交叉证据。宽泛数学词不能制造 AI 桥接，论文证据也不能绕过官方方向锚点。OpenAlex 只在本地配置 `OPENALEX_API_KEY` 时启用，key 不写入工作簿、manifest 或仓库。
+
+## 9. arXiv 与已知网页证据
 
 入口：
 
@@ -189,15 +201,15 @@ python scripts/legacy/complete_teacher_research.py <target>
 
 该阶段负责：
 
-- 查询近三年 arXiv 记录。
+- 查询 target 配置的论文窗口内 arXiv 记录。
 - 标注 arXiv 置信度。
 - 抓取已解析出的个人主页或实验室主页。
 - 无个人主页时回退抓取官方教师主页。
-- 合并主页、DBLP、arXiv 和网页证据。
+- 合并主页、target 第二阶段论文、arXiv 和网页证据。
 
-arXiv 同名噪声高，只能作为辅助。只有与已确认 DBLP 作者或论文题目交叉验证的记录才可达到中置信；按姓名和方向相似得到的结果保持低置信，不能单独改变推荐等级。
+arXiv 同名噪声高，只能作为辅助。只有与已确认学术作者、机构或论文题目交叉验证的记录才可达到中置信；按姓名和方向相似得到的结果保持低置信，不能单独改变推荐等级。
 
-## 9. 可选 WebSearch 补充
+## 10. 可选 WebSearch 补充
 
 入口：
 
@@ -221,13 +233,13 @@ user_private/overrides/web_search_curated.json
 
 更完整的触发条件、采信边界和输出字段见 [WebSearch 补充层说明](web-search-supplement.md)。
 
-## 10. 综合推荐
+## 11. 综合推荐
 
 所有阶段调用同一个 ranking policy，采集模块不再各自维护等级阈值。当前统一门槛为 `可以考虑 >= 24`、`强烈建议 >= 44`，且两者都必须先满足官方显式核心锚点。推荐等级由多类证据综合而来：
 
 - 教师主页：基础方向证据。
 - PDF 导师库或团队介绍：可审计的附件方向和团队证据。
-- DBLP：高置信作者匹配下的近期论文证据。
+- 学科论文：计算机目标使用 DBLP；数学/统计目标使用官方列表、zbMATH 和可选 OpenAlex。
 - arXiv：辅助预印本证据。
 - 已知网页：个人、实验室、新闻或项目线索。
 - WebSearch：自动结果只发现来源，人工确认后才可有限补强。
@@ -236,7 +248,7 @@ user_private/overrides/web_search_curated.json
 
 - 分数用于排序，不替代推荐理由。
 - 推荐等级必须有显式方向锚点：教师主页、官方名录、导师信息库 PDF 或团队 PDF 中出现学生画像的核心方向。
-- DBLP、arXiv、网页和 WebSearch 可以补强证据，但缺少显式方向锚点时不能单独把候选抬进优先名单。
+- 学科论文、arXiv、网页和 WebSearch 可以补强证据，但缺少显式方向锚点时不能单独把候选抬进优先名单。
 - LLM、NLP、信息检索、通用多模态和 Agent 类命中只按画像权重计分；默认不应作为具身操作方向的加分项。
 - 强推荐应有可靠核心证据。
 - 方向相关但证据弱的候选进入 `可以考虑` 或待复核。
@@ -245,38 +257,40 @@ user_private/overrides/web_search_curated.json
 
 工作簿会写入 `评分规则版本`、`显式核心锚点`、各证据分项和 `评分警告`，便于判断分数来自哪里。`教师ID` 用强身份 URL、邮箱或目标内临时身份生成；临时 ID 不应被当作跨目标同一人的证明。
 
-## 11. 运行可复现性
+## 12. 运行可复现性
 
 每个学院目录的 `run_manifest.json` 按阶段记录：
 
-- 画像哈希与是否 demo。
+- 画像 ID、画像哈希与是否 demo。
+- evidence profile 与配置的论文窗口。
 - ranking policy 和数据 schema 版本。
-- Git revision、动态近三年窗口和输入文件哈希。
+- Git revision 和输入文件哈希。
 - 运行 ID 与生成时间。
 
 第三阶段 checkpoint 的指纹同时包含教师 ID、关键输入证据、画像哈希、policy/schema 版本、年份窗口和输入哈希。旧规则、旧画像或上游工作簿变化后，旧 checkpoint 会失效；`--finalize-only` 默认要求 100% 有效覆盖，只有明确接受缺失行时才使用 `--allow-partial`。
 
-## 12. Excel 与看板
+## 13. Excel 与看板
 
 最终工作簿通常包含：
 
 - `优先套磁名单`
 - `全量教师名录`
 - `DBLP近三年明细`
+- `数学文献近五年明细`（数学/统计 target）
 - `arXiv近三年明细`
 - `网页证据明细`
 - 可选 `WebSearch证据明细`
 - `匹配依据`
 
-本地看板读取 `outputs/` 中的最终工作簿，并把人工联系状态写入：
+本地看板读取所选画像根目录中的最终工作簿，并把人工联系状态写入同一画像的：
 
 ```text
-outputs/contact_status.json
+<profile_root>/contact_status.json
 ```
 
 JSON 是本地编辑状态源；Excel 是查看和交付产物。
 
-看板直接消费工作簿中的 `是否建议套磁`、`推荐等级`、`匹配分`、`命中关键词`、`显式核心锚点`、各来源证据分和 `评分警告`，不在前端重新计算推荐。列表把核心匹配和锚点/风险放在首屏；详情将官方方向与 DBLP、arXiv、已知网页和 WebSearch 辅助信号分层展示，证据明细默认折叠。旧工作簿缺少结构化 policy 字段时只标记为旧数据，不从论文数量或综合方向文本推断新结论。
+看板直接消费工作簿中的 policy 输出，不在前端重新计算推荐。标题栏可手动切换画像；每个数据、详情和联系请求都显式绑定画像 ID。详情将官方方向与画像命中、DBLP 或数学文献、AI 交叉、arXiv、已知网页和 WebSearch 信号分层展示。旧工作簿缺少结构化字段时只标记为旧数据，不从论文数量推断新结论。
 
 套磁日历固定在教师列表筛选和详情栏上方，三者共用教师 ID、选择状态和 `contact_status.json`，但日历的学校/学院筛选与教师列表筛选相互独立。日历使用连续四周条带，星期为固定列头，周行按当前周相对命名，每次前后移动一周。每个日期只展示各回复状态的颜色和数量；已安排具体面试时间时增加菱形标记，点击日期后显示当天教师、完整回复链和面试时间，再点击教师进入同一详情。缺日期记录默认折叠，不生成同校或同学院套磁频率警告。日期、回复或面试时间编辑成功后立即刷新四周统计和当天教师列表。
 
@@ -289,17 +303,17 @@ JSON 是本地编辑状态源；Excel 是查看和交付产物。
 - 自定义回复和原 `套磁备注` 内容合并到 `回复情况备注`。
 - 看板里的“隐藏已标记”会隐藏所有 `套磁情况` 非空的教师，不只隐藏 `已套磁`。
 
-## 13. 质量检查
+## 14. 质量检查
 
 交付前检查：
 
 - 教师行数是否符合目录解析预期。
-- 强推荐是否有可靠主页、DBLP 或网页证据。
+- 强推荐是否有可靠官方方向锚点和可追溯证据。
 - PDF 附件解析是否保留来源 URL，且没有把办公地点、页眉页脚误当成方向。
 - 低置信 arXiv 是否没有单独改变推荐等级。
-- DBLP 歧义候选是否人工看过。
+- 学术作者歧义候选是否人工看过。
 - 每位候选是否有清晰推荐理由。
-- 输出、cache 和 checkpoint 是否位于 `outputs/<school_slug>/<college_slug>/`。
+- 输出、cache、checkpoint 和联系状态是否位于同一画像根目录。
 
 可用以下命令做聚合质量门禁，命令只影子评分，不改写现有 Excel：
 
@@ -309,13 +323,13 @@ tutor audit --fail-on-violations
 
 它会检查优先项是否缺少官方锚点、推荐理由或教师 ID。checkpoint 覆盖可用 `tutor doctor <target>` 检查。
 
-## 14. 隐私边界
+## 15. 隐私边界
 
 以下内容不进入公开仓库：
 
 - 简历、申请表和学生画像。
 - 当前运行生成的 Excel、cache、checkpoint。
-- `outputs/contact_status.json`。
+- 各画像根目录中的 `contact_status.json`。
 - 当前爬取结果规模、教师级证据和人工复核结论。
 - 本地阶段交接和私有调研记录。
 

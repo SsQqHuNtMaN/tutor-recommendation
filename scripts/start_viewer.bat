@@ -67,7 +67,7 @@ if not "%PORT%"=="%PREFERRED_PORT%" (
 )
 
 echo Starting teacher viewer: %URL%
-if "%VIEWER_NO_BROWSER%" neq "1" start "" powershell -NoProfile -WindowStyle Hidden -Command "$url='%URL%'; for ($i=0; $i -lt 60; $i++) { try { $health=Invoke-RestMethod -UseBasicParsing -TimeoutSec 1 ($url + 'api/health'); if ($health.apiVersion -eq 5) { Start-Process $url; exit 0 } } catch {}; Start-Sleep -Milliseconds 250 }; exit 1"
+if "%VIEWER_NO_BROWSER%" neq "1" start "" powershell -NoProfile -WindowStyle Hidden -Command "$url='%URL%'; for ($i=0; $i -lt 60; $i++) { try { $health=Invoke-RestMethod -UseBasicParsing -TimeoutSec 1 ($url + 'api/health'); if ($health.apiVersion -eq 6) { Start-Process $url; exit 0 } } catch {}; Start-Sleep -Milliseconds 250 }; exit 1"
 "%PYTHON_BIN%" tutor.py view --host "%HOST%" --port "%PORT%"
 
 if errorlevel 1 pause

@@ -24,7 +24,7 @@ python -c "import pandas, openpyxl, requests, bs4, pypinyin, fitz; print('ok')"
 
 ## 2. Agent 私人资料与学生画像
 
-用户把真实简历、申请表和个人说明放在 `user_private/source/`。Coding Agent 使用内部工具建立工作区并抽取草稿：
+单画像兼容入口是 `user_private/source/`；多个学生或申请方向使用 `user_private/profiles/<profile_id>/source/`。Coding Agent 建立工作区并抽取草稿：
 
 ```powershell
 tutor setup
@@ -103,6 +103,7 @@ python scripts/legacy/complete_teacher_research.py <target>
 ```text
 outputs/<school_slug>/<college_slug>/<school_slug>_<college_slug>_teacher_match.xlsx
 outputs/<school_slug>/<college_slug>/<school_slug>_<college_slug>_teacher_match_dblp.xlsx
+outputs/<school_slug>/<college_slug>/<school_slug>_<college_slug>_teacher_match_publications.xlsx
 outputs/<school_slug>/<college_slug>/<school_slug>_<college_slug>_teacher_match_full_research.xlsx
 ```
 
@@ -161,8 +162,10 @@ $env:DBLP_OVERRIDES_PATH='D:\path\to\dblp_overrides.json'
 第三阶段 checkpoint 位于：
 
 ```text
-outputs/<school_slug>/<college_slug>/full_research_checkpoint.jsonl
+<profile_root>/<school_slug>/<college_slug>/full_research_checkpoint.jsonl
 ```
+
+其中 `<profile_root>` 是旧画像的 `outputs/`，或命名画像的 `outputs/by_profile/<profile_id>/`。
 
 中断后直接重跑同一命令即可。只想用现有 checkpoint 重新汇总最终 Excel，不发起新网络请求：
 
@@ -176,9 +179,9 @@ python scripts/legacy/complete_teacher_research.py <target> --finalize-only
 tutor doctor <target>
 ```
 
-只有明确接受未覆盖行缺少深检索证据时才使用 `--allow-partial`。如果第一阶段、DBLP 表、学生画像、评分规则、年份窗口或关键教师字段变化，不要只用 finalize-only；正常重跑第三阶段会忽略 stale checkpoint 并重新补查对应行。
+只有明确接受未覆盖行缺少深检索证据时才使用 `--allow-partial`。如果第一阶段、第二阶段论文证据表、学生画像、评分规则、论文窗口或关键教师字段变化，不要只用 finalize-only；正常重跑第三阶段会忽略 stale checkpoint 并重新补查对应行。
 
-如果第一阶段新增或更新了 PDF 附件解析列，也应正常重跑第二、三阶段。DBLP 阶段会以最新第一阶段行作为底稿，保留已有 DBLP 证据并携带新增列到后续工作簿。
+如果第一阶段新增或更新了 PDF 附件解析列，也应正常重跑第二、三阶段。第二阶段会以最新第一阶段行作为底稿，保留已有学科论文证据并携带新增列到后续工作簿。
 
 ## 7. 可选 WebSearch 补充层
 
@@ -236,13 +239,13 @@ python tutor.py view --port 8765
 http://127.0.0.1:8765/
 ```
 
-看板读取 `outputs/` 中的最终工作簿，教师列表支持按学校、学院、推荐等级、证据状态和套磁状态筛选，也可以临时隐藏所有 `套磁情况` 非空的教师。人工编辑会写入：
+看板读取当前所选画像的最终工作簿。标题栏的“学生画像”下拉框可在运行期间手动切换；切换会重新加载教师、筛选、日历、详情和联系状态，不会回退到其他画像。教师列表支持按学校、学院、推荐等级、证据状态和套磁状态筛选，也可以临时隐藏所有 `套磁情况` 非空的教师。人工编辑写入该画像自己的：
 
 ```text
-outputs/contact_status.json
+<profile_root>/contact_status.json
 ```
 
-主表用于快速判断：推荐等级、匹配分、`命中关键词`、教师主页提取的 `研究方向` 和 `显式核心锚点`/`评分警告` 会并列显示。官方方向在表格中最多显示三行，悬停可查看全文；详情顶部直接展示 `是否建议套磁`，随后列出各来源证据分，并把教师主页或官方材料中的方向与 DBLP、arXiv、网页、WebSearch 辅助信号分开。证据明细默认折叠，避免把论文数量误当成方向适配度。
+主表用于快速判断：推荐等级、匹配分、`命中关键词`、教师主页提取的 `研究方向` 和 `显式核心锚点`/`评分警告` 会并列显示。官方方向在表格中最多显示三行，悬停可查看全文；详情顶部直接展示 `是否建议套磁`，随后列出各来源证据分，并把教师主页方向与 DBLP 或数学文献、AI 交叉、arXiv、网页和 WebSearch 辅助信号分开。证据明细默认折叠，避免把论文数量误当成方向适配度。
 
 “查看已套磁”只显示 `套磁情况=已套磁` 的教师。“隐藏已标记”会隐藏所有非空状态，包括 `已套磁`、`先不考虑`、`不可能` 和 `不匹配`；同时启用两个相反筛选时结果为空。
 
@@ -266,7 +269,7 @@ outputs/contact_status.json
 python scripts/legacy/sync_contact_status_to_workbooks.py
 ```
 
-`outputs/contact_status.json` 是本地编辑状态源；Excel 更适合查看、审计和交付。
+所选画像的 `<profile_root>/contact_status.json` 是本地编辑状态源；Excel 更适合查看、审计和交付。
 
 看板只允许监听 `127.0.0.1`、`localhost` 或 `::1`。写接口要求当前进程的会话令牌、同源 Host/Origin、`application/json` 和 2 MiB 请求体上限；不要用 `0.0.0.0` 暴露到局域网。状态 JSON 损坏时服务会报错并拒绝静默覆盖。
 
@@ -284,11 +287,11 @@ python scripts/legacy/sync_contact_status_to_workbooks.py
 交付前建议检查：
 
 - `全量教师名录` 行数是否符合目录解析预期。
-- `优先套磁名单` 是否都能追溯到主页、DBLP、arXiv、网页或搜索证据。
+- `优先套磁名单` 是否都能追溯到主页、学科论文、arXiv、网页或搜索证据。
 - 低置信 arXiv 是否没有单独驱动 `强烈建议`。
-- DBLP 歧义、未匹配或抓取失败的高价值候选是否人工看过。
+- 学术作者歧义、未匹配或抓取失败的高价值候选是否人工看过。
 - 每位推荐教师都有可读 `推荐理由`。
-- 输出、cache 和 checkpoint 是否都在 `outputs/<school_slug>/<college_slug>/`。
+- 输出、cache、checkpoint 和联系状态是否都位于同一画像根目录。
 - 对重叠学院运行跨目标重复审计：普通目标的强身份 URL 不应重复；显式 overlap group 中保留的重复应有多学院归属证据；剩余同校同名项应能解释为不同人或待人工复核。
 - PDF 附件目标是否生成了 `pdf_cache/`，且 `导师信息库PDF` 等来源列可回溯。
 - 真实简历、画像、结果表、cache、联系状态和私有交接资料是否未被 Git 跟踪。
@@ -311,6 +314,12 @@ DBLP 抓取失败：
 - 可能是限流、TLS、代理或远端断连。
 - 稍后重跑第二阶段。
 - 不要把 `503`、`504` 或 HTML 错误页当成有效 XML。
+
+数学文献证据缺失：
+
+- 先检查官方 publication list 和 zbMATH 状态；数据库无记录保持中性。
+- OpenAlex 是可选身份补充，需要时在本地设置 `$env:OPENALEX_API_KEY='...'`，不要把 key 写入文件。
+- 只有姓名、没有机构、ORCID 或官网题名交叉确认的作者候选保持待复核。
 
 arXiv 命中过多：
 
@@ -350,6 +359,7 @@ Excel 写入失败：
 
 ```powershell
 Remove-Item -LiteralPath 'outputs\<school_slug>\<college_slug>\dblp_cache' -Recurse -Force
+Remove-Item -LiteralPath 'outputs\<school_slug>\<college_slug>\math_publication_cache' -Recurse -Force
 Remove-Item -LiteralPath 'outputs\<school_slug>\<college_slug>\arxiv_cache' -Recurse -Force
 Remove-Item -LiteralPath 'outputs\<school_slug>\<college_slug>\web_cache' -Recurse -Force
 Remove-Item -LiteralPath 'outputs\<school_slug>\<college_slug>\pdf_cache' -Recurse -Force
@@ -358,7 +368,7 @@ Remove-Item -LiteralPath 'outputs\<school_slug>\<college_slug>\pdf_cache' -Recur
 删除前确认路径符合：
 
 ```text
-outputs/<school_slug>/<college_slug>/<cache_dir>
+<profile_root>/<school_slug>/<college_slug>/<cache_dir>
 ```
 
 不要对 `outputs/` 根目录递归删除。

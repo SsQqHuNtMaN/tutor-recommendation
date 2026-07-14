@@ -35,7 +35,8 @@ directory into auditable teacher recommendation workbooks:
 
 - collect faculty directory and homepage fields,
 - match against configurable profile keywords,
-- add DBLP, arXiv, known webpage, and optional bounded web-search evidence,
+- add target-specific publication, arXiv, known webpage, and optional bounded
+  web-search evidence,
 - classify candidates into `强烈建议`, `可以考虑`, and `暂不优先`,
 - keep recommendation reasons and evidence sources reviewable,
 - track manual contact status locally through the viewer.
@@ -45,8 +46,9 @@ directory into auditable teacher recommendation workbooks:
 - The user supplies private materials, target school/college, preferences, and
   confirmation of uncertain profile fields. The Coding Agent performs the
   commands, target integration, evidence workflow, checks, and Viewer launch.
-- Start by reading `user_private/request.md` when it exists and inspecting
-  `user_private/source/`. Never commit either path's private contents.
+- Start by reading `user_private/request.md` when it exists and inspecting the
+  selected profile's source directory (or legacy `user_private/source/`). Never
+  commit either path's private contents.
 - Generate only a draft profile from source materials. A user-confirmed
   named profile under `user_private/profiles/<profile_id>/student_profile.json`
   or the legacy `user_private/profile/student_profile.json` is required for
@@ -68,11 +70,7 @@ directory into auditable teacher recommendation workbooks:
 - `src/tutor_recommendation/collectors/registry.py`: explicit target-to-collector
   binding; every registered target must have an implementation.
 - `requirements.txt`: core runtime dependencies.
-- `data/templates/student_profile.example.json`: public placeholder profile.
-- `data/templates/dblp_overrides.example.json`: public DBLP override format.
-- `data/templates/web_search_curated.example.json`: public curated search format.
-- `data/templates/seu_college_affiliations.example.json`: public SEU
-  multi-college affiliation override format.
+- `data/templates/`: public placeholder profile and reviewed-override schemas.
 - `src/tutor_recommendation/student_profile.py`: loads the confirmed profile
   selected by the profile registry, the legacy private path, or
   `STUDENT_PROFILE_PATH`.
@@ -85,8 +83,8 @@ directory into auditable teacher recommendation workbooks:
 - `src/tutor_recommendation/run_manifest.py`: run provenance and checkpoint
   fingerprint inputs.
 - `src/tutor_recommendation/teacher_match_targets.py`: target registry.
-- `src/tutor_recommendation/first_pass_research.py`: directory/homepage
-  collection, target-specific PDF supplements, and first-pass scoring.
+- `src/tutor_recommendation/first_pass_research.py`: compatibility first-pass
+  orchestration, target-specific PDF supplements, and first-pass scoring.
 - `src/tutor_recommendation/dblp_research.py`: DBLP author disambiguation and
   recent-paper evidence.
 - `src/tutor_recommendation/publication_adapters.py` and
@@ -101,9 +99,7 @@ directory into auditable teacher recommendation workbooks:
   four-week contact strip, teacher list, and detail workspace.
 - `docs/viewer-integrated-layout.md`: implemented calendar-above-list layout,
   shared selection behavior, and collapsible detail sidebar contract.
-- `docs/web-search-supplement.md`: stable bounded WebSearch usage and evidence
-  acceptance rules.
-- Root `*.py` files are thin CLI wrappers that add `src` to `sys.path`.
+- `tutor.py`: repository-root launcher; legacy wrappers live in `scripts/legacy/`.
 
 ## Common Commands
 
@@ -190,10 +186,12 @@ python scripts/legacy/sync_contact_status_to_workbooks.py
 
 ## Output Contract
 
-Generated outputs are local-only and ignored:
+Generated outputs are local-only and ignored. Legacy/default runs use the first
+root; named profiles use the second:
 
 ```text
 outputs/<school_slug>/<college_slug>/
+outputs/by_profile/<profile_id>/<school_slug>/<college_slug>/
 ```
 
 Typical files:
@@ -211,9 +209,10 @@ Typical files:
 - optional `web_search_cache/`
 - optional `math_publication_cache/`
 
-The dashboard stores manual contact state in `outputs/contact_status.json`.
-Excel workbooks are view/delivery artifacts; JSON is the local editable source
-for contact state.
+The dashboard stores manual contact state beside the selected profile root:
+`outputs/contact_status.json` for legacy/default runs or
+`outputs/by_profile/<profile_id>/contact_status.json` for named profiles. Excel
+workbooks are view/delivery artifacts; JSON is the local editable source.
 Contact columns are `套磁情况`, `套磁时间`, `回复情况`, `约面试时间`, and
 `回复情况备注`.
 Valid contact statuses are `已套磁`, `先不考虑`, `不可能`, and `不匹配`.

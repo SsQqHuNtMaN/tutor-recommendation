@@ -16,7 +16,8 @@ class ViewerSecurityTests(unittest.TestCase):
         project_root = Path(__file__).resolve().parents[1]
         batch = (project_root / "scripts/start_viewer.bat").read_text(encoding="utf-8")
         shell = (project_root / "scripts/start_viewer.sh").read_text(encoding="utf-8")
-        self.assertIn(f"$health.apiVersion -eq {VIEWER_API_VERSION}", batch)
+        self.assertEqual(batch.count(f"$health.apiVersion -eq {VIEWER_API_VERSION}"), 2)
+        self.assertEqual(batch.count("$health.apiVersion -eq"), 2)
         self.assertIn(f'health.get("apiVersion") == {VIEWER_API_VERSION}', shell.replace("'", '"'))
 
     def test_only_loopback_hosts_are_allowed(self) -> None:

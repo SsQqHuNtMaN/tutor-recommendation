@@ -3,9 +3,10 @@
 New Agent-first work should use `user_private/`. This directory remains readable
 for compatibility with existing local profiles and overrides.
 
-The matching code first reads `user_private/profile/student_profile.json`, then
-falls back to `data/private/student_profile.json`. You can also point to another
-profile with:
+Profile selection prefers an explicit profile ID or path, then
+`user_private/active_profile.json`. Legacy runs fall back to
+`user_private/profile/student_profile.json` and then
+`data/private/student_profile.json`. You can also point to another profile with:
 
 ```powershell
 $env:STUDENT_PROFILE_PATH='D:\path\to\student_profile.json'

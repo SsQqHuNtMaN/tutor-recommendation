@@ -64,10 +64,14 @@ docs/private/project-context.local.md
 
 ## 私有状态位置
 
-- 私人材料：user_private/source/
-- 学生画像：user_private/profile/student_profile.json
-- 输出结果：outputs/<school_slug>/<college_slug>/
-- 联系状态：outputs/contact_status.json
+- 画像 ID：<profile_id 或 legacy-default>
+- 私人材料：user_private/profiles/<profile_id>/source/
+- 学生画像：user_private/profiles/<profile_id>/student_profile.json
+- 输出结果：outputs/by_profile/<profile_id>/<school_slug>/<college_slug>/
+- 联系状态：outputs/by_profile/<profile_id>/contact_status.json
+
+未迁移的默认画像可继续使用 `user_private/source/`、
+`user_private/profile/student_profile.json` 和 `outputs/` 根目录。
 ```
 
 ## 当前公开状态
