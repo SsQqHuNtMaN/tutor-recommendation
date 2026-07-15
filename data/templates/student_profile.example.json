@@ -17,6 +17,18 @@
     ["artificial intelligence", "人工智能"],
     ["machine learning", "机器学习"]
   ],
+  "direction_term_groups": {
+    "ai_methods": [
+      "artificial intelligence",
+      "人工智能",
+      "machine learning",
+      "机器学习",
+      "data mining"
+    ],
+    "software_methods": [
+      "software engineering"
+    ]
+  },
   "high_signal_terms": [
     "artificial intelligence",
     "machine learning",

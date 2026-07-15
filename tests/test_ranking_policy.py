@@ -7,7 +7,7 @@ from pathlib import Path
 
 os.environ.setdefault("TUTOR_ALLOW_TEMPLATE_PROFILE", "1")
 
-from tutor_recommendation.ranking_policy import evaluate_teacher, score_text  # noqa: E402
+from tutor_recommendation.ranking_policy import direction_groups_for_keywords, evaluate_teacher, score_text  # noqa: E402
 from tutor_recommendation.student_profile import StudentProfile  # noqa: E402
 
 
@@ -33,8 +33,107 @@ ALIAS_PROFILE = StudentProfile(
     concept_alias_groups=(("robot", "robotic"),),
 )
 
+EXPANDED_MATH_AI_PROFILE = StudentProfile(
+    resume_match_context="math, statistics, and AI exploration",
+    keyword_weights=[
+        ("machine learning", 26),
+        ("causal inference", 26),
+        ("high-dimensional data analysis", 26),
+        ("Bayesian statistics", 26),
+        ("applied statistics", 16),
+    ],
+    institute_bonus=[],
+    high_signal_terms={
+        "machine learning",
+        "causal inference",
+        "high-dimensional data analysis",
+        "bayesian statistics",
+        "applied statistics",
+    },
+    source_path=Path("expanded-math-ai.json"),
+    profile_hash="expanded-math-ai",
+    is_demo=False,
+    direction_term_groups={
+        "statistics_methods": frozenset({"high-dimensional data analysis", "bayesian statistics", "applied statistics"}),
+        "ai_methods": frozenset({"machine learning"}),
+        "math_ai_bridges": frozenset({"causal inference"}),
+    },
+)
+
+SINGLE_GROUP_PROFILE = StudentProfile(
+    resume_match_context="statistics exploration",
+    keyword_weights=[("Bayesian statistics", 26), ("high-dimensional data analysis", 26)],
+    institute_bonus=[],
+    high_signal_terms={"bayesian statistics", "high-dimensional data analysis"},
+    source_path=Path("single-group.json"),
+    profile_hash="single-group",
+    is_demo=False,
+    direction_term_groups={
+        "statistics_methods": frozenset({"bayesian statistics", "high-dimensional data analysis"}),
+    },
+)
+
 
 class RankingPolicyTests(unittest.TestCase):
+    def test_expanded_math_ai_directions_create_auditable_exploration_anchors(self) -> None:
+        cases = (
+            ("machine learning", "ai_methods"),
+            ("causal inference", "math_ai_bridges"),
+            ("high-dimensional data analysis", "statistics_methods"),
+            ("Bayesian statistics", "statistics_methods"),
+        )
+        for direction, expected_group in cases:
+            with self.subTest(direction=direction):
+                decision = evaluate_teacher({"研究方向": direction}, profile=EXPANDED_MATH_AI_PROFILE)
+                self.assertTrue(decision.explicit_anchor)
+                self.assertEqual(decision.level, "可以考虑")
+                self.assertIn(expected_group, decision.matched_direction_groups)
+
+    def test_multiple_independent_expanded_directions_can_be_strong(self) -> None:
+        decision = evaluate_teacher(
+            {"研究方向": "causal inference and high-dimensional data analysis"},
+            profile=EXPANDED_MATH_AI_PROFILE,
+        )
+        self.assertEqual(decision.level, "强烈建议")
+        self.assertEqual(set(decision.matched_direction_groups), {"statistics_methods", "math_ai_bridges"})
+
+    def test_single_direction_group_without_auxiliary_evidence_is_capped_at_consider(self) -> None:
+        decision = evaluate_teacher(
+            {"研究方向": "Bayesian statistics and high-dimensional data analysis"},
+            profile=SINGLE_GROUP_PROFILE,
+        )
+        self.assertEqual(decision.score, 52)
+        self.assertEqual(decision.level, "可以考虑")
+        self.assertTrue(any("单一画像方向组" in reason for reason in decision.reasons))
+
+    def test_single_direction_group_can_be_strong_with_confirmed_publications(self) -> None:
+        decision = evaluate_teacher(
+            {"研究方向": "Bayesian statistics and high-dimensional data analysis"},
+            profile=SINGLE_GROUP_PROFILE,
+            publication={
+                "status": "official:success/high",
+                "confidence": "high",
+                "keywords": "Bayesian statistics",
+                "titles": "Bayesian statistics for complex data",
+            },
+        )
+        self.assertEqual(decision.level, "强烈建议")
+        self.assertGreater(decision.breakdown["publication"], 0)
+
+    def test_broad_applied_statistics_or_big_data_alone_is_not_prioritized(self) -> None:
+        broad = evaluate_teacher({"研究方向": "applied statistics"}, profile=EXPANDED_MATH_AI_PROFILE)
+        generic = evaluate_teacher({"研究方向": "big data applications"}, profile=EXPANDED_MATH_AI_PROFILE)
+        self.assertEqual(broad.level, "暂不优先")
+        self.assertTrue(broad.explicit_anchor)
+        self.assertEqual(generic.score, 0)
+        self.assertFalse(generic.explicit_anchor)
+
+    def test_direction_group_mapping_is_profile_driven(self) -> None:
+        self.assertEqual(
+            direction_groups_for_keywords(["machine learning", "causal inference"], EXPANDED_MATH_AI_PROFILE),
+            ("ai_methods", "math_ai_bridges"),
+        )
+
     def test_profile_excluded_direction_is_reported_and_not_prioritized(self) -> None:
         profile = StudentProfile(
             resume_match_context="optimization for learning",
@@ -135,6 +234,32 @@ class RankingPolicyTests(unittest.TestCase):
         decision = evaluate_teacher(unanchored, profile=PROFILE, publication=evidence)
         self.assertEqual(decision.breakdown["publication"], 0)
         self.assertEqual(decision.can_contact, "否")
+
+    def test_negative_publication_states_never_score(self) -> None:
+        row = {"研究方向": "robot manipulation"}
+        base = evaluate_teacher(row, profile=PROFILE)
+        for status in (
+            "official:no_record",
+            "official:no_recent_record/high",
+            "zbmath:no_candidate/high",
+            "zbmath:identity_uncertain/high",
+            "zbmath:review/high",
+            "zbmath:rejected/high",
+            "zbmath:unsuccessful/high",
+        ):
+            with self.subTest(status=status):
+                decision = evaluate_teacher(
+                    row,
+                    profile=PROFILE,
+                    publication={
+                        "status": status,
+                        "confidence": "high",
+                        "keywords": "robot manipulation",
+                        "titles": "Reliable Robot Manipulation",
+                    },
+                )
+                self.assertEqual(decision.score, base.score)
+                self.assertEqual(decision.breakdown["publication"], 0)
 
 
 if __name__ == "__main__":

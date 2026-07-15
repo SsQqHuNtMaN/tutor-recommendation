@@ -4,7 +4,7 @@ import hashlib
 import json
 import subprocess
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -64,6 +64,7 @@ class RunContext:
     code_revision: str
     recent_years: tuple[str, ...]
     input_hashes: dict[str, str]
+    stage_metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def fingerprint(self) -> str:
@@ -77,6 +78,7 @@ def create_run_context(
     input_paths: Iterable[Path] = (),
     *,
     recent_year_count: int = 3,
+    stage_metadata: dict[str, Any] | None = None,
 ) -> RunContext:
     hashes = {str(path): file_sha256(path) for path in input_paths}
     return RunContext(
@@ -94,6 +96,7 @@ def create_run_context(
         code_revision=code_revision(),
         recent_years=recent_years(count=recent_year_count),
         input_hashes=hashes,
+        stage_metadata=dict(stage_metadata or {}),
     )
 
 
@@ -154,6 +157,7 @@ def context_source_rows(context: RunContext) -> list[dict[str, str]]:
         {"项目": "代码版本", "内容": context.code_revision},
         {"项目": "近年论文口径", "内容": "/".join(context.recent_years)},
         {"项目": "输入哈希", "内容": json.dumps(context.input_hashes, ensure_ascii=False, sort_keys=True)},
+        {"项目": "阶段元数据", "内容": json.dumps(context.stage_metadata, ensure_ascii=False, sort_keys=True)},
     ]
 
 
@@ -174,6 +178,12 @@ def checkpoint_fingerprint(row: Any, school_slug: str, college_slug: str, contex
         "学术作者匹配状态",
         "学术作者匹配置信度",
         "学术作者ID",
+        "OpenAlex作者ID",
+        "zbMATH作者ID",
+        "论文身份种子哈希",
+        "论文身份决策哈希",
+        "论文来源报告哈希",
+        "规范论文摘要哈希",
         "主要数学分类",
         "近五年关键词",
         "近五年代表论文",
@@ -188,5 +198,9 @@ def checkpoint_fingerprint(row: Any, school_slug: str, college_slug: str, contex
         "recent_years": context.recent_years,
         "input_hashes": context.input_hashes,
     }
+    if "论文相关性标签" in row:
+        payload["row"]["论文相关性标签"] = norm_text(row.get("论文相关性标签", ""))
+    if context.stage_metadata:
+        payload["stage_metadata"] = context.stage_metadata
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

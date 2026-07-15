@@ -400,6 +400,8 @@ async function loadProfileData(profileId, { announce = true } = {}) {
     raw: record.raw || {},
     dblp: record.dblp || [],
     publication: record.publication || [],
+    publicationCandidates: record.publicationCandidates || [],
+    publicationSources: record.publicationSources || [],
     arxiv: record.arxiv || [],
     web: record.web || [],
     webSearch: record.webSearch || [],
@@ -721,6 +723,7 @@ function uniqueSignals(values, seen = new Set()) {
 
 function directionViewModel(row) {
   const matchedKeywords = uniqueSignals([row["命中关键词"]]);
+  const matchedGroups = uniqueSignals([row["画像方向分组"]]);
   const officialItems = uniqueParts([
     ["教师主页", row["研究方向"]],
     ["导师信息库", row["导师信息库研究方向"]],
@@ -737,7 +740,7 @@ function directionViewModel(row) {
   const fallback = norm(
     row["综合研究方向（主页+DBLP+arXiv+网页）"] || row["综合研究方向（主页+DBLP）"],
   );
-  return { matchedKeywords, officialItems, sourceGroups, fallback };
+  return { matchedKeywords, matchedGroups, officialItems, sourceGroups, fallback };
 }
 
 function signalChips(terms, limit = 6, extraClass = "") {
@@ -1499,6 +1502,13 @@ function scoreBreakdownSection(row) {
 
 function directionSection(row) {
   const view = directionViewModel(row);
+  const groups = view.matchedGroups.length
+    ? `<div class="direction-group"><div class="direction-group-label">画像方向分组</div><div class="signal-list">${signalChips(
+        view.matchedGroups,
+        8,
+        "signal-secondary",
+      )}</div></div>`
+    : "";
   const matched = view.matchedKeywords.length
     ? `<div class="direction-group direction-primary"><div class="direction-group-label">匹配重点</div><div class="signal-list">${signalChips(
         view.matchedKeywords,
@@ -1522,13 +1532,13 @@ function directionSection(row) {
         )}</div><div class="signal-list">${signalChips(terms, 8, "signal-secondary")}</div></div>`,
     )
     .join("");
-  const fallback = !matched && !official && !sources && view.fallback
+  const fallback = !groups && !matched && !official && !sources && view.fallback
     ? `<div class="direction-group"><div class="direction-group-label">历史综合结果</div><p class="direction-official">${escapeHtml(
         view.fallback,
       )}</p></div>`
     : "";
-  if (!matched && !official && !sources && !fallback) return "";
-  return `<section id="detailDirection" class="section direction-section"><h2>方向判断</h2>${matched}${official}${sources}${fallback}</section>`;
+  if (!groups && !matched && !official && !sources && !fallback) return "";
+  return `<section id="detailDirection" class="section direction-section"><h2>方向判断</h2>${groups}${matched}${official}${sources}${fallback}</section>`;
 }
 
 const DETAIL_JUMP_TARGETS = [
@@ -1636,6 +1646,8 @@ function detailEvidenceSections(record) {
   return [
     evidenceSection("DBLP近三年", record.dblp, ["年份", "venue", "题名", "链接"]),
     evidenceSection("数学文献近五年", record.publication, ["来源", "作者身份置信度", "是否计入匹配", "年份", "题名", "分类", "主题", "证据URL"]),
+    evidenceSection("学术作者候选", record.publicationCandidates, ["来源", "候选排名", "候选作者ID", "候选状态", "身份置信度", "候选决策", "是否需人工复核", "证据信号", "冲突原因"]),
+    evidenceSection("论文来源状态", record.publicationSources, ["来源", "阶段", "状态", "来源健康度", "原始记录数", "接受记录数", "是否截断", "原因"]),
     evidenceSection("arXiv近年", record.arxiv, ["发布日期", "题名", "分类", "链接"]),
     evidenceSection("网页证据", record.web, ["网页URL", "证据"]),
     evidenceSection("WebSearch证据", record.webSearch, ["WebSearch置信度", "来源类型", "标题", "证据", "关键词", "来源URL"]),
@@ -1650,6 +1662,8 @@ async function loadRecordDetails(record) {
     if (!response.ok) throw new Error(data.error || `请求失败：${response.status}`);
     record.dblp = data.dblp || [];
     record.publication = data.publication || [];
+    record.publicationCandidates = data.publicationCandidates || [];
+    record.publicationSources = data.publicationSources || [];
     record.arxiv = data.arxiv || [];
     record.web = data.web || [];
     record.webSearch = data.webSearch || [];

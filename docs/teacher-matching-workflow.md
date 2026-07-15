@@ -33,6 +33,7 @@ tutor profile use <profile_id>
 - `institute_bonus`：院所、实验室或方向单位加分。
 - `high_signal_terms`：足以触发强相关判断的核心词。
 - `concept_alias_groups`：中文、英文、缩写等同义概念组；同组命中只计一次。
+- `direction_term_groups`：可选的方向分组，将已有正权重词归入数学方法、统计方法、AI 方法或学科桥接等可解释类别；同一个词不能跨组重复。
 - `excluded_terms`：明确不考虑的方向；命中时给出警告，没有更高优先级官方锚点时不得进入推荐名单。
 
 如果目标画像聚焦具身智能、具身操作或机器人操作，应把 LLM、NLP、信息检索、通用多模态和 Agent 类词设为低权重或零权重。宽泛 AI 词不能替代明确的机器人、操作、抓取、触觉、VLA 等方向证据。
@@ -187,7 +188,17 @@ data/templates/dblp_overrides.example.json
 python scripts/legacy/update_teacher_match_with_math_publications.py <target>
 ```
 
-证据优先级是官方 publication list、zbMATH Open、可选 OpenAlex。官方页面提供身份与方向锚点；开放数据库用于补全配置窗口内的题名、年份、DOI、MSC/topic 和来源。作者必须通过 ORCID、机构、官网题名/DOI 重合等信号达到中高置信；只有姓名的候选不计分。数据库无记录保持中性，引用数、h-index 和论文数量不直接参与推荐。
+证据优先级是官方 publication list、zbMATH Open、可选 OpenAlex。官网字段先经过 publication 章节识别和记录级校验；空值、履历、奖项、项目或只有年份的文本不得进入论文计数。开放数据库用于补全配置窗口内的题名、年份、DOI、MSC/topic 和来源。
+
+每位教师都会先生成基于稳定教师 ID 的论文身份种子，并执行有界作者候选发现；第一阶段画像分为 0 不再导致静默跳过。候选发现阶段不拉取 works，只有画像候选或通过 ORCID、机构、官网题名/DOI、人工确认 source ID 等证据达到中高置信的身份才进入论文拉取。拼音和姓名别名只用于召回，姓名-only 候选不计数、不计分。`no_candidate` 表示没有找到作者候选，不等于“该教师没有论文”；`no_recent_record` 只用于已确认作者在当前窗口无记录的情况。
+
+官网明确标注的英文姓名、页面 meta/标题以及与中文姓名拼音严格一致的官网论文作者串可以补充召回别名，并记录证据类型；URL slug 和机器转写仍只能生成候选，不能自动确认作者。HTML 论文区块支持列表、表格、`<br>` 多行引用和中英文编号，跨行重建后仍需通过记录级门禁。
+
+需要人工确认时，从 `data/templates/publication_identity_overrides.example.json` 复制结构到 ignored 的 `user_private/overrides/publication_identity_overrides.json`。覆盖项必须使用 `teacher_id`，并为确认或拒绝结论提供可复核证据；不得只按姓名跨教师复用。数据库无记录保持中性，引用数、h-index 和论文数量不直接参与推荐。
+
+已接受记录会统一为 canonical work。合并顺序是规范 DOI、arXiv ID、来源稳定 ID，再到受作者与年份约束的标准化题名；预印本与正式版本只计一篇，同时保留全部来源 ID 和证据 URL。来源请求区分 `success`、`no_candidate`、`identity_uncertain`、`no_recent_record`、`not_configured`、`terms_required`、`request_failed` 和 `schema_changed`，失败页或限流响应不能被缓存为正常空结果。每个来源独立降级，截断和 schema 异常在来源报告中显式标记。
+
+每条 canonical work 可以输出稳定的解释标签，例如 `optimization_for_ai`、`statistical_machine_learning`、`scientific_machine_learning`、`formal_math_reasoning` 或 `uncertain`。标签只帮助审阅，不直接改变推荐等级；MSC、arXiv category 和 OpenAlex topic 只参与标签说明，不能单独制造画像关键词命中。
 
 `mathematics_ai` 额外区分数学/统计核心匹配和 AI 交叉证据。宽泛数学词不能制造 AI 桥接，论文证据也不能绕过官方方向锚点。OpenAlex 只在本地配置 `OPENALEX_API_KEY` 时启用，key 不写入工作簿、manifest 或仓库。
 
@@ -251,6 +262,7 @@ user_private/overrides/web_search_curated.json
 - 学科论文、arXiv、网页和 WebSearch 可以补强证据，但缺少显式方向锚点时不能单独把候选抬进优先名单。
 - LLM、NLP、信息检索、通用多模态和 Agent 类命中只按画像权重计分；默认不应作为具身操作方向的加分项。
 - 强推荐应有可靠核心证据。
+- 配置了 `direction_term_groups` 的画像中，单个明确方向组可以进入 `可以考虑`；达到强推荐分数后，仍需命中至少两个独立方向组，或得到通过身份门禁的论文、已知网页等可信辅助证据。未配置方向分组的旧画像继续沿用原有阈值语义。
 - 方向相关但证据弱的候选进入 `可以考虑` 或待复核。
 - 只有低置信同名证据时保持保守。
 - 每条推荐都应能追溯到证据列。
@@ -277,6 +289,8 @@ user_private/overrides/web_search_curated.json
 - `全量教师名录`
 - `DBLP近三年明细`
 - `数学文献近五年明细`（数学/统计 target）
+- `学术作者候选`（数学/统计 target）
+- `论文来源报告`（数学/统计 target）
 - `arXiv近三年明细`
 - `网页证据明细`
 - 可选 `WebSearch证据明细`
@@ -290,7 +304,7 @@ user_private/overrides/web_search_curated.json
 
 JSON 是本地编辑状态源；Excel 是查看和交付产物。
 
-看板直接消费工作簿中的 policy 输出，不在前端重新计算推荐。标题栏可手动切换画像；每个数据、详情和联系请求都显式绑定画像 ID。详情将官方方向与画像命中、DBLP 或数学文献、AI 交叉、arXiv、已知网页和 WebSearch 信号分层展示。旧工作簿缺少结构化字段时只标记为旧数据，不从论文数量推断新结论。
+看板直接消费工作簿中的 policy 输出，不在前端重新计算推荐。标题栏可手动切换画像；每个数据、详情和联系请求都显式绑定画像 ID。详情先展示 `画像方向分组` 和命中词，再将官方方向、DBLP 或已确认数学文献、学术作者候选、论文来源状态、AI 交叉、arXiv、已知网页和 WebSearch 信号分层展示。所有数学文献明细均优先按稳定教师 ID 关联；旧工作簿才回退到姓名。旧工作簿缺少结构化字段时只标记为旧数据，不从论文数量推断新结论。
 
 套磁日历固定在教师列表筛选和详情栏上方，三者共用教师 ID、选择状态和 `contact_status.json`，但日历的学校/学院筛选与教师列表筛选相互独立。日历使用连续四周条带，星期为固定列头，周行按当前周相对命名，每次前后移动一周。每个日期只展示各回复状态的颜色和数量；已安排具体面试时间时增加菱形标记，点击日期后显示当天教师、完整回复链和面试时间，再点击教师进入同一详情。缺日期记录默认折叠，不生成同校或同学院套磁频率警告。日期、回复或面试时间编辑成功后立即刷新四周统计和当天教师列表。
 
@@ -321,7 +335,7 @@ JSON 是本地编辑状态源；Excel 是查看和交付产物。
 tutor audit --fail-on-violations
 ```
 
-它会检查优先项是否缺少官方锚点、推荐理由或教师 ID。checkpoint 覆盖可用 `tutor doctor <target>` 检查。
+它会检查优先项是否缺少官方锚点、推荐理由或教师 ID。checkpoint 覆盖可用 `tutor doctor <target>` 检查；数学 target 还会审计身份种子覆盖、空题名、重复 canonical work、来源追溯、作者复核队列和各来源状态。
 
 ## 15. 隐私边界
 

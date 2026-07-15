@@ -1,0 +1,32 @@
+{
+  "_note": "Copy this file to user_private/overrides/publication_identity_overrides.json. Every entry must use a stable teacher_id and include reviewable evidence; do not commit real teacher decisions.",
+  "targets": [
+    {
+      "teacher_id": "teacher_example123",
+      "name": "Example Teacher",
+      "canonical_english_name": "Example Teacher",
+      "aliases": [
+        "Teacher Example"
+      ],
+      "affiliations": [
+        "Example University"
+      ],
+      "orcid": "",
+      "source_ids": {
+        "openalex": "",
+        "zbmath": "",
+        "dblp": ""
+      },
+      "rejected_source_ids": {
+        "openalex": [],
+        "zbmath": []
+      },
+      "known_titles": [],
+      "known_coauthors": [],
+      "review_status": "confirmed",
+      "evidence": [
+        "Official faculty page URL or a concise review note"
+      ]
+    }
+  ]
+}

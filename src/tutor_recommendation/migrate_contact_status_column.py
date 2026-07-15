@@ -201,7 +201,8 @@ def migrate_workbook(path: Path, store: dict, authoritative: bool = False) -> bo
 def iter_current_workbooks() -> list[Path]:
     paths = []
     for path in Path("outputs").rglob("*.xlsx"):
-        if "archive" in path.parts:
+        lowered_parts = {part.casefold() for part in path.parts}
+        if "archive" in lowered_parts or "_shadow" in lowered_parts or "shadow_runs" in lowered_parts:
             continue
         paths.append(path)
     return sorted(paths)

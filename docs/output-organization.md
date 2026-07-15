@@ -144,7 +144,7 @@ python scripts/legacy/sync_contact_status_to_workbooks.py
 
 联系状态列固定为 `套磁情况`、`套磁时间`、`回复情况`、`约面试时间`、`回复情况备注`。`约面试时间` 使用本地日期时间并精确到分钟；`套磁情况` 允许 `已套磁`、`先不考虑`、`不可能`、`不匹配`。旧 `套磁备注` 和自定义回复文本应迁移到 `回复情况备注`。
 
-最终主表还包含稳定身份与排名审计列，例如 `教师ID`、`身份置信度`、`显式核心锚点`、`评分规则版本`、各证据分项和 `评分警告`。只有强 URL 或邮箱身份可跨阶段稳定复用；目标内 provisional ID 仍表示待复核身份。
+最终主表还包含稳定身份与排名审计列，例如 `教师ID`、`身份置信度`、`显式核心锚点`、`画像方向分组`、`评分规则版本`、各证据分项和 `评分警告`。方向分组由当前画像配置和 policy 计算，前端只展示、不重算。只有强 URL 或邮箱身份可跨阶段稳定复用；目标内 provisional ID 仍表示待复核身份。
 
 看板会用这些结构化列直接展示套磁判断、核心匹配、教师主页方向和风险，不会重新评分。套磁日历与表格共用 `contact_status.json`，但筛选彼此独立：日历只使用自己的学校和学院选项，教师列表使用搜索、推荐等级和套磁状态等选项。日历固定在列表筛选和可折叠详情栏上方，以连续四周条带显示每天各回复状态的数量；点击日期后才列出当天教师和完整回复链。缺日期记录保留为默认折叠列表，不再生成套磁频率警告。首次选择“已套磁”且 `套磁时间` 为空时，会按本机日期补入当天；已有日期保持不变。旧工作簿缺列时页面会标记“旧数据”；要获得完整的锚点和分来源得分展示，需要按当前 policy 重跑三阶段。
 
@@ -154,6 +154,7 @@ cache 必须跟随学院目录，不放在 `outputs/` 根层：
 
 - DBLP cache：`<profile_root>/<school_slug>/<college_slug>/dblp_cache/`
 - 数学文献 cache：`<profile_root>/<school_slug>/<college_slug>/math_publication_cache/`
+- 数学文献审计产物：`<profile_root>/<school_slug>/<college_slug>/math_publication_audit/`
 - arXiv cache：`<profile_root>/<school_slug>/<college_slug>/arxiv_cache/`
 - 网页 cache：`<profile_root>/<school_slug>/<college_slug>/web_cache/`
 - PDF 附件 cache：`<profile_root>/<school_slug>/<college_slug>/pdf_cache/`
@@ -167,6 +168,10 @@ cache 必须跟随学院目录，不放在 `outputs/` 根层：
 - DBLP affiliation 关键词按学校切换，缓存和证据来源保持一致。
 
 缓存默认有时效：DBLP 为 14 天，arXiv/已知网页和 WebSearch 为 7 天。可分别用 `DBLP_CACHE_MAX_AGE_DAYS`、`RESEARCH_CACHE_MAX_AGE_DAYS`、`WEB_SEARCH_CACHE_MAX_AGE_DAYS` 覆盖；设置为 `0` 表示本次运行不读取旧缓存。
+
+数学文献 cache 按来源、查询参数、论文窗口、适配器版本和教师身份种子哈希隔离。请求失败、Terms 页面或 schema 异常不会写成正常空结果。受控 shadow 运行应放在画像根目录下带 `_shadow` 的独立目录；Viewer、联系状态迁移和正式产物发现会忽略该目录，验证后应由正式流程重建工作簿，而不是直接复制 shadow 文件。
+
+`math_publication_audit/` 是 ignored 的机器可读审计目录，使用原子写入保存查询计划、来源报告、作者候选、仅含真正歧义项的复核队列及 canonical 论文 JSONL。它与工作簿内容对应，但不进入公开仓库，也不作为 Viewer 的人工联系状态源。
 
 ## 可选证据列
 
@@ -203,7 +208,7 @@ cache 必须跟随学院目录，不放在 `outputs/` 根层：
 <profile_root>/<school_slug>/<college_slug>/run_manifest.json
 ```
 
-manifest 按阶段记录运行 ID、画像 ID 与哈希、evidence profile、配置的论文窗口、policy/schema 版本、Git revision 和输入文件哈希。它用于审计产物来源，不替代 Excel 中的 `匹配依据` sheet。
+manifest 按阶段记录运行 ID、画像 ID 与哈希、evidence profile、配置的论文窗口、policy/schema 版本、Git revision 和输入文件哈希。数学论文阶段额外记录启用来源、source policy、适配器/cache 版本和是否配置私有 identity override；只记录配置状态与哈希，不记录 API key 或私有覆盖内容。它用于审计产物来源，不替代 Excel 中的 `匹配依据` sheet。
 
 ## Archive 规则
 
@@ -217,6 +222,8 @@ manifest 按阶段记录运行 ID、画像 ID 与哈希、evidence profile、配
 - 运行清单：`run_manifest.json`
 
 不要让脚本依赖 `archive/` 里的文件。
+
+数学文献表和最终综合表中的 `数学文献近五年明细` 保存去重后的 canonical works；`学术作者候选` 保存候选身份及逐信号决策，`论文来源报告` 保存请求健康度、原始/接受/拒绝数量和截断状态。三张表通过稳定教师 ID 关联，review/rejected 候选不混入主论文明细。
 
 ## 新增学校或学院
 

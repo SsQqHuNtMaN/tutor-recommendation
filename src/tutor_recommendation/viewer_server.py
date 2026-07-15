@@ -47,7 +47,7 @@ DATA_CACHE: dict[str, dict[str, Any]] = {}
 DETAIL_CACHE_LOCK = Lock()
 DETAIL_CACHE: dict[str, dict[str, Any]] = {}
 CSRF_TOKEN = secrets.token_urlsafe(32)
-VIEWER_API_VERSION = 6
+VIEWER_API_VERSION = 7
 MAX_JSON_BYTES = 2 * 1024 * 1024
 SUMMARY_CACHE_VERSION = 1
 SUMMARY_CACHE_PATH = OUTPUTS_DIR / ".viewer_summary_cache.json"
@@ -55,6 +55,8 @@ FINAL_SHEET = "全量教师名录"
 DETAIL_SHEETS = {
     "dblp": ["DBLP近三年明细", "DBLP近三年论文明细"],
     "publication": ["数学文献近五年明细"],
+    "publicationCandidates": ["学术作者候选"],
+    "publicationSources": ["论文来源报告"],
     "arxiv": ["arXiv近五年明细", "arXiv近三年明细"],
     "web": ["网页证据明细"],
     "webSearch": ["WebSearch证据明细"],
@@ -113,7 +115,12 @@ def record_key(target: TargetConfig, raw: dict[str, Any]) -> str:
 
 
 def same_teacher(item: dict[str, Any], raw: dict[str, Any]) -> bool:
-    if norm_text(item.get("姓名")) != norm_text(raw.get("姓名")):
+    item_teacher_id = norm_text(item.get("教师ID"))
+    teacher_id = norm_text(raw.get("教师ID"))
+    if item_teacher_id and teacher_id:
+        return item_teacher_id == teacher_id
+    item_name = norm_text(item.get("姓名") or item.get("教师姓名"))
+    if item_name != norm_text(raw.get("姓名")):
         return False
     item_teacher_url = norm_text(item.get("教师主页链接"))
     teacher_url = norm_text(raw.get("教师主页链接"))
@@ -123,12 +130,19 @@ def same_teacher(item: dict[str, Any], raw: dict[str, Any]) -> bool:
 def detail_index(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     indexed: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        indexed.setdefault(norm_text(row.get("姓名")), []).append(row)
+        teacher_id = norm_text(row.get("教师ID"))
+        name = norm_text(row.get("姓名") or row.get("教师姓名"))
+        key = f"id:{teacher_id}" if teacher_id else f"name:{name}"
+        indexed.setdefault(key, []).append(row)
     return indexed
 
 
 def matching_details(indexed: dict[str, list[dict[str, Any]]], raw: dict[str, Any]) -> list[dict[str, Any]]:
-    candidates = indexed.get(norm_text(raw.get("姓名")), [])
+    teacher_id = norm_text(raw.get("教师ID"))
+    candidates = indexed.get(f"id:{teacher_id}", []) if teacher_id else []
+    if not candidates:
+        name = norm_text(raw.get("姓名"))
+        candidates = indexed.get(f"name:{name}", []) or indexed.get(name, [])
     return [item for item in candidates if same_teacher(item, raw)]
 
 
@@ -365,6 +379,8 @@ def detail_payload(row_key: str, profile_id: str = LEGACY_PROFILE_ID) -> dict[st
         "key": row_key,
         "dblp": matching_details(indexes["dblp"], raw),
         "publication": matching_details(indexes.get("publication", {}), raw),
+        "publicationCandidates": matching_details(indexes.get("publicationCandidates", {}), raw),
+        "publicationSources": matching_details(indexes.get("publicationSources", {}), raw),
         "arxiv": matching_details(indexes["arxiv"], raw),
         "web": matching_details(indexes["web"], raw),
         "webSearch": matching_details(indexes["webSearch"], raw),

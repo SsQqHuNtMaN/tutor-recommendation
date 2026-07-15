@@ -8,13 +8,62 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup, Tag
 
+from ..publication_evidence import looks_like_publication_record, split_publication_entries
 from ..teacher_match_targets import TargetConfig
 
 
 PAGE_PATTERN = re.compile(r"^index\d*\.htm$", re.I)
 EMAIL_PATTERN = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
-YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")
+YEAR_PATTERN = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
 DOI_PATTERN = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.I)
+ENGLISH_NAME_LABEL_PATTERN = re.compile(
+    r"(?:英文姓名|英文名|english\s+name)\s*[：:]\s*([A-Za-z][A-Za-z .,'-]{2,60})",
+    re.I,
+)
+ENGLISH_NAME_BLOCK_WORDS = {
+    "university",
+    "institute",
+    "school",
+    "college",
+    "faculty",
+    "department",
+    "renmin",
+    "china",
+    "homepage",
+    "profile",
+}
+PUBLICATION_SECTION_MARKERS = (
+    "selected publications",
+    "representative publications",
+    "publications",
+    "论文发表",
+    "发表论文",
+    "主要论文",
+    "代表性论文",
+    "代表论文",
+    "近年来主要论著",
+    "主要论著",
+    "近期主要学术成果",
+    "主要学术成果",
+)
+PUBLICATION_STOP_MARKERS = (
+    "工作经历",
+    "教育经历",
+    "任职经历",
+    "学习经历",
+    "个人经历",
+    "奖励",
+    "荣誉",
+    "获奖",
+    "科研项目",
+    "研究项目",
+    "基金项目",
+    "教学项目",
+    "社会兼职",
+    "主讲课程",
+    "讲授课程",
+    "招生信息",
+)
 
 
 def norm_text(value: Any) -> str:
@@ -75,6 +124,8 @@ def parse_directory_cards(soup: BeautifulSoup, page_url: str) -> list[dict[str, 
         rows.append(
             {
                 "姓名": name,
+                "英文姓名": "",
+                "英文姓名来源": "",
                 "职称": title,
                 "研究方向": direction,
                 "邮箱": email_match.group(0) if email_match else "",
@@ -113,15 +164,122 @@ def _personal_homepage(body: Tag | None, detail_url: str) -> str:
     return (preferred or fallback or [""])[0]
 
 
+def _section_prefix(text: str) -> tuple[str, str]:
+    lowered = text.lower().strip()
+    lowered = re.sub(r"^[一二三四五六七八九十\d]+[、.)）]\s*", "", lowered)
+    for kind, markers in (("publication", PUBLICATION_SECTION_MARKERS), ("stop", PUBLICATION_STOP_MARKERS)):
+        for marker in markers:
+            index = lowered.find(marker)
+            if index < 0 or index > 2:
+                continue
+            end = index + len(marker)
+            suffix = lowered[end:]
+            if not suffix or suffix[0] in "：:-—" or len(lowered) <= len(marker) + 8:
+                return kind, text[end:].lstrip(" ：:-—")
+    return "", ""
+
+
+def _node_chunks(node: Tag) -> list[str]:
+    if node.name == "tr":
+        cells = [norm_text(cell.get_text(" ", strip=True)) for cell in node.find_all(["th", "td"], recursive=False)]
+        joined = " | ".join(cell for cell in cells if cell)
+        return [joined] if joined else []
+    return [norm_text(part) for part in node.get_text("\n", strip=True).splitlines() if norm_text(part)]
+
+
+def _node_publication_entries(node: Tag, chunks: list[str]) -> list[str]:
+    if not chunks:
+        return []
+    candidate_chunks = chunks
+    if len(chunks) > 1:
+        joined = " ".join(chunks)
+        individually_valid = [chunk for chunk in chunks if looks_like_publication_record(chunk)]
+        # A paragraph broken by <br> commonly separates authors, title and venue.
+        # Preserve independently valid numbered rows, otherwise reconstruct the full citation.
+        if looks_like_publication_record(joined) and len(individually_valid) <= 1:
+            candidate_chunks = [joined]
+    entries: list[str] = []
+    for chunk in candidate_chunks:
+        entries.extend(split_publication_entries(chunk))
+    return entries
+
+
+def _clean_english_person_name(value: Any) -> str:
+    text = norm_text(value).strip("-–—|,;：:()[]{}")
+    text = re.sub(r"\s+", " ", text)
+    tokens = re.findall(r"[A-Za-z]+(?:['-][A-Za-z]+)?|[A-Z]\.", text)
+    if not 2 <= len(tokens) <= 4:
+        return ""
+    if any(token.casefold().rstrip(".") in ENGLISH_NAME_BLOCK_WORDS for token in tokens):
+        return ""
+    candidate = " ".join(tokens)
+    return candidate if re.fullmatch(r"[A-Za-z][A-Za-z .'-]+", candidate) else ""
+
+
+def _official_english_name(soup: BeautifulSoup, header: Tag | None, body: Tag | None) -> tuple[str, str]:
+    for container, source in ((header, "official_label"), (body, "official_label")):
+        if container is None:
+            continue
+        for node in container.select("p, li"):
+            match = ENGLISH_NAME_LABEL_PATTERN.search(norm_text(node.get_text(" ", strip=True)))
+            if match:
+                candidate = _clean_english_person_name(match.group(1))
+                if candidate:
+                    return candidate, source
+    for selector in ("meta[name='author']", "meta[name='citation_author']"):
+        node = soup.select_one(selector)
+        candidate = _clean_english_person_name(node.get("content") if node else "")
+        if candidate:
+            return candidate, "official_meta"
+    heading = header.select_one("h1, h2") if header else None
+    if heading is not None:
+        heading_text = norm_text(heading.get_text(" ", strip=True))
+        latin_text = norm_text(re.sub(r"[^A-Za-z .'-]", " ", heading_text))
+        candidate = _clean_english_person_name(latin_text)
+        if candidate:
+            return candidate, "official_heading"
+    return "", ""
+
+
 def _publication_lines(body: Tag | None) -> list[str]:
     if body is None:
         return []
     lines: list[str] = []
-    for node in body.select("p, li"):
-        text = norm_text(node.get_text(" ", strip=True))
-        if 20 <= len(text) <= 1200 and (YEAR_PATTERN.search(text) or DOI_PATTERN.search(text)):
-            if text not in lines:
-                lines.append(text)
+    active = False
+    nodes = body.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "tr"])
+    for node in nodes:
+        if node.name in {"p", "li", "tr"} and node.find_parent(["p", "li", "tr"]) is not None:
+            continue
+        chunks = _node_chunks(node)
+        if not chunks:
+            continue
+
+        heading_kind = ""
+        remainder = ""
+        emphasis = node.find(["strong", "b"])
+        if emphasis is not None:
+            heading_kind, _ = _section_prefix(norm_text(emphasis.get_text(" ", strip=True)))
+            if heading_kind:
+                emphasized = norm_text(emphasis.get_text(" ", strip=True))
+                chunks = [chunk for chunk in chunks if chunk != emphasized]
+        if not heading_kind:
+            heading_kind, remainder = _section_prefix(chunks[0])
+            if heading_kind:
+                chunks = chunks[1:]
+                if remainder:
+                    chunks.insert(0, remainder)
+
+        if heading_kind == "stop":
+            active = False
+            continue
+        if heading_kind == "publication":
+            active = True
+        if not active:
+            continue
+
+        for entry in _node_publication_entries(node, chunks):
+            if 12 <= len(entry) <= 1600 and looks_like_publication_record(entry) and entry not in lines:
+                lines.append(entry)
         if len(lines) >= 40:
             break
     return lines
@@ -133,6 +291,9 @@ def _biography_text(body: Tag | None) -> str:
     stop_markers = (
         "selected publications",
         "representative publications",
+        "publications",
+        "论文发表",
+        "发表论文",
         "主要学术成果",
         "代表性论文",
         "代表论文",
@@ -167,6 +328,10 @@ def parse_teacher_detail(soup: BeautifulSoup, row: dict[str, Any]) -> dict[str, 
         if email_match:
             detail["邮箱"] = email_match.group(0)
     detail["个人主页"] = _personal_homepage(body, detail["教师主页链接"])
+    english_name, english_name_source = _official_english_name(soup, header, body)
+    if english_name:
+        detail["英文姓名"] = english_name
+        detail["英文姓名来源"] = english_name_source
     detail["个人简介摘要"] = _biography_text(body)
     publications = _publication_lines(body)
     detail["官方论文列表"] = "\n".join(publications)

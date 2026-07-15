@@ -90,7 +90,10 @@ class ViewerLayoutTests(unittest.TestCase):
         self.assertIn("数学文献近五年", script)
         self.assertIn('["数学论文", "论文证据分"', script)
         self.assertIn("record.publication", script)
+        self.assertIn('row["画像方向分组"]', script)
         self.assertIn('"publication": ["数学文献近五年明细"]', server)
+        self.assertIn('"publicationCandidates": ["学术作者候选"]', server)
+        self.assertIn('"publicationSources": ["论文来源报告"]', server)
 
 
 if __name__ == "__main__":

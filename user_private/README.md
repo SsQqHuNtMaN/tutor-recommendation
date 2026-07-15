@@ -33,6 +33,6 @@ user_private/
 2. 复制 `request.example.md` 为 `request.md` 并填写目标，或直接在对话中告诉 Coding Agent。
 3. 要求 Coding Agent 读取材料、生成画像草稿、集中询问待确认项并完成匹配。
 
-画像草稿不能直接驱动正式匹配。Coding Agent 必须让用户确认研究方向、关键词权重和强信号词，再保存到所选画像目录并通过校验。不同画像的材料、结果、checkpoint 和联系状态不会混用。
+画像草稿不能直接驱动正式匹配。Coding Agent 必须让用户确认研究方向、关键词权重、同义概念组、可选方向分组和强信号词，再保存到所选画像目录并通过校验。`direction_term_groups` 用于把已有正权重词归入数学、统计、AI 或学科桥接等可解释类别；不同画像的材料、结果、checkpoint 和联系状态不会混用。
 
 兼容期内，旧 `data/private/student_profile.json` 仍可读取，但新任务优先使用这里。

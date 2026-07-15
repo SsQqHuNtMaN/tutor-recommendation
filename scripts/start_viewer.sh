@@ -29,7 +29,7 @@ with urllib.request.urlopen(base + "/api/health", timeout=0.5) as response:
     health = json.load(response)
 with urllib.request.urlopen(base + "/api/session", timeout=0.5) as response:
     session = json.load(response)
-raise SystemExit(0 if health.get("apiVersion") == 6 and session.get("token") else 1)
+raise SystemExit(0 if health.get("apiVersion") == 7 and session.get("token") else 1)
 PY
 }
 

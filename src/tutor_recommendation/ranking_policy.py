@@ -7,10 +7,16 @@ from typing import Any, Iterable
 from .student_profile import PROFILE, StudentProfile
 
 
-POLICY_VERSION = "2026.07.14-multi-profile-publications"
-SCHEMA_VERSION = 3
+POLICY_VERSION = "2026.07.15-math-ai-exploration-v3"
+SCHEMA_VERSION = 5
 CONSIDER_THRESHOLD = 24
 STRONG_THRESHOLD = 44
+DIRECTION_GROUP_LABELS = {
+    "math_methods": "数学方法",
+    "statistics_methods": "统计方法",
+    "ai_methods": "AI方法",
+    "math_ai_bridges": "数学-AI桥接",
+}
 
 EXPLICIT_ANCHOR_COLUMNS = (
     "研究方向",
@@ -120,6 +126,7 @@ class RankingDecision:
     can_contact: str
     explicit_anchor: bool
     matched_keywords: tuple[str, ...]
+    matched_direction_groups: tuple[str, ...]
     reasons: tuple[str, ...]
     warnings: tuple[str, ...]
     breakdown: dict[str, int]
@@ -130,6 +137,9 @@ class RankingDecision:
             "是否建议套磁": self.can_contact,
             "匹配分": self.score,
             "命中关键词": unique_join(self.matched_keywords),
+            "画像方向分组": unique_join(
+                DIRECTION_GROUP_LABELS.get(group, group) for group in self.matched_direction_groups
+            ),
             "推荐理由": "；".join(self.reasons),
             "显式核心锚点": "是" if self.explicit_anchor else "否",
             "评分规则版本": POLICY_VERSION,
@@ -165,6 +175,15 @@ def _core_matches(text: str, profile: StudentProfile) -> list[str]:
     return sorted(term for term in profile.high_signal_terms if keyword_in_text(term, lower))
 
 
+def direction_groups_for_keywords(keywords: Iterable[Any], profile: StudentProfile = PROFILE) -> tuple[str, ...]:
+    lowered = {norm_text(keyword).lower() for keyword in keywords if norm_text(keyword)}
+    return tuple(
+        group_name
+        for group_name, terms in profile.direction_term_groups.items()
+        if lowered & set(terms)
+    )
+
+
 def _institute_bonus(row: Any, profile: StudentProfile) -> tuple[int, list[str]]:
     text = _row_text(row, ("名录研究所", "主页研究所", "官方系别")).lower()
     matches = [(keyword, bonus) for keyword, bonus in profile.institute_bonus if bonus > 0 and keyword.lower() in text]
@@ -174,6 +193,17 @@ def _institute_bonus(row: Any, profile: StudentProfile) -> tuple[int, list[str]]
 
 def _confidence(value: Any) -> str:
     return norm_text(value).lower()
+
+
+def _publication_source_statuses(value: Any) -> set[str]:
+    statuses: set[str] = set()
+    for raw_part in norm_text(value).split(";"):
+        part = raw_part.strip()
+        if not part:
+            continue
+        state = part.split(":", 1)[1] if ":" in part else part
+        statuses.add(state.split("/", 1)[0].strip().lower())
+    return statuses
 
 
 def evaluate_teacher(
@@ -246,7 +276,10 @@ def evaluate_teacher(
         ]
     )
     publication_raw, publication_keywords = score_text(publication_text, profile=profile, max_terms=8)
-    publication_confirmed = publication_confidence in {"high", "medium", "高", "中"} and "success" in publication_status
+    publication_confirmed = (
+        publication_confidence in {"high", "medium", "高", "中"}
+        and "success" in _publication_source_statuses(publication_status)
+    )
     if explicit_core and publication_confirmed:
         breakdown["publication"] = min(round(publication_raw * 0.35), 18)
         matched.extend(publication_keywords)
@@ -304,6 +337,13 @@ def evaluate_teacher(
         warnings.append("自动WebSearch仅用于发现来源，未直接影响排名")
 
     score = sum(breakdown.values())
+    matched_direction_groups = direction_groups_for_keywords(dict.fromkeys(matched), profile)
+    auxiliary_score = sum(value for key, value in breakdown.items() if key != "official")
+    grouped_strong_evidence = (
+        not profile.direction_term_groups
+        or len(matched_direction_groups) >= 2
+        or auxiliary_score > 0
+    )
     excluded_without_primary = bool(excluded_matches) and not explicit_core
     if excluded_without_primary:
         score = min(score, CONSIDER_THRESHOLD - 1)
@@ -315,7 +355,7 @@ def evaluate_teacher(
         level = "暂不优先"
         can_contact = "否"
         reasons.append("官方名录、教师主页或官方PDF中缺少当前画像的显式核心方向锚点")
-    elif score >= STRONG_THRESHOLD:
+    elif score >= STRONG_THRESHOLD and grouped_strong_evidence:
         level = "强烈建议"
         can_contact = "是"
         reasons.insert(0, f"官方方向明确命中核心方向：{unique_join(explicit_core[:4])}")
@@ -327,6 +367,11 @@ def evaluate_teacher(
         level = "暂不优先"
         can_contact = "否"
         reasons.append("虽有核心方向词，但当前证据强度尚未达到优先名单门槛")
+    if score >= STRONG_THRESHOLD and not grouped_strong_evidence:
+        level = "可以考虑"
+        can_contact = "是"
+        reasons.insert(0, f"官方方向命中核心方向：{unique_join(explicit_core[:4])}")
+        reasons.append("当前命中集中在单一画像方向组且缺少可信辅助证据，暂不提升为强烈建议")
 
     if not reasons:
         reasons.append("当前可核查证据与学生画像关联较弱")
@@ -336,6 +381,7 @@ def evaluate_teacher(
         can_contact=can_contact,
         explicit_anchor=bool(explicit_core),
         matched_keywords=tuple(dict.fromkeys(matched)),
+        matched_direction_groups=matched_direction_groups,
         reasons=tuple(dict.fromkeys(reasons)),
         warnings=tuple(dict.fromkeys(warnings)),
         breakdown=breakdown,

@@ -40,6 +40,7 @@ from .run_manifest import (
     write_stage_manifest,
 )
 from .profile_registry import configured_output_root
+from .publication_identity import identity_query_names
 
 
 SCHOOL_SLUG = os.environ.get("SCHOOL_SLUG", "sjtu")
@@ -60,6 +61,10 @@ WEB_CACHE = OUTPUT_DIR / "web_cache"
 TODAY = date.today().isoformat()
 
 ARXIV_API = "https://export.arxiv.org/api/query"
+ARXIV_REQUEST_INTERVAL_SECONDS = max(
+    1.0,
+    float(os.environ.get("ARXIV_REQUEST_INTERVAL_SECONDS", "3.0")),
+)
 SOURCE_LINKS = {
     "DBLP": "https://dblp.org/",
     "arXiv": "https://export.arxiv.org/api/query",
@@ -181,6 +186,29 @@ def load_dblp_detail_sheet() -> pd.DataFrame:
     return pd.DataFrame()
 
 
+def load_math_diagnostic_sheets() -> dict[str, pd.DataFrame]:
+    """Carry additive math-publication diagnostics without changing legacy sheets."""
+    output = {"学术作者候选": pd.DataFrame(), "论文来源报告": pd.DataFrame()}
+    if not IS_MATH_EVIDENCE or not INPUT_PATH.exists():
+        return output
+    for sheet_name in output:
+        try:
+            output[sheet_name] = pd.read_excel(INPUT_PATH, sheet_name=sheet_name)
+        except (OSError, ValueError):
+            pass
+    return output
+
+
+def publication_detail_dedup_columns(frame: pd.DataFrame, *, is_math: bool) -> list[str]:
+    if is_math and {TEACHER_ID_COLUMN, "规范论文ID"}.issubset(frame.columns):
+        return [TEACHER_ID_COLUMN, "规范论文ID"]
+    return [
+        column
+        for column in [TEACHER_ID_COLUMN, "DBLP作者链接", "年份", "题名", "链接"]
+        if column in frame
+    ]
+
+
 def load_existing_web_search() -> tuple[dict[str, dict[str, Any]], pd.DataFrame]:
     if not OUTPUT_PATH.exists():
         return {}, pd.DataFrame()
@@ -219,6 +247,7 @@ def parse_arxiv_entries(xml_text: str, query_name: str) -> dict[str, Any]:
     ns = {
         "a": "http://www.w3.org/2005/Atom",
         "opensearch": "http://a9.com/-/spec/opensearch/1.1/",
+        "arxiv": "http://arxiv.org/schemas/atom",
     }
     root = ET.fromstring(xml_text.encode("utf-8"))
     total = int(root.findtext("opensearch:totalResults", "0", namespaces=ns) or 0)
@@ -239,6 +268,11 @@ def parse_arxiv_entries(xml_text: str, query_name: str) -> dict[str, Any]:
             continue
         title = norm_text(entry.findtext("a:title", default="", namespaces=ns)).rstrip(".")
         summary = norm_text(entry.findtext("a:summary", default="", namespaces=ns))
+        arxiv_url = norm_text(entry.findtext("a:id", default="", namespaces=ns))
+        arxiv_id = arxiv_url.rstrip("/").rsplit("/", 1)[-1]
+        updated = norm_text(entry.findtext("a:updated", default="", namespaces=ns))
+        doi = norm_text(entry.findtext("arxiv:doi", default="", namespaces=ns))
+        journal_ref = norm_text(entry.findtext("arxiv:journal_ref", default="", namespaces=ns))
         link = ""
         for link_node in entry.findall("a:link", ns):
             if link_node.attrib.get("rel") == "alternate":
@@ -253,11 +287,15 @@ def parse_arxiv_entries(xml_text: str, query_name: str) -> dict[str, Any]:
             {
                 "year": year,
                 "published": published[:10],
+                "updated": updated[:10],
                 "title": title,
                 "summary": summary,
                 "categories": ", ".join(categories),
                 "link": link,
                 "authors": "; ".join(authors[:12]),
+                "arxiv_id": arxiv_id,
+                "doi": doi,
+                "journal_ref": journal_ref,
             }
         )
     entries.sort(key=lambda item: item["published"], reverse=True)
@@ -269,14 +307,17 @@ def query_arxiv(row: pd.Series) -> dict[str, Any]:
         return {"状态": "未检索-低相关或同名风险", "论文": []}
     name = norm_text(row.get("姓名"))
     teacher_url = norm_text(row.get("教师主页链接"))
-    candidates = western_name_candidates(name, teacher_url)[:2]
+    identity_candidates = [
+        candidate for candidate in identity_query_names(row) if re.search(r"[A-Za-z]", candidate)
+    ]
+    candidates = (identity_candidates or western_name_candidates(name, teacher_url))[:2]
     if not candidates:
         return {"状态": "未查询-无英文姓名候选", "论文": []}
 
     all_entries: list[dict[str, str]] = []
     totals: list[int] = []
     errors: list[str] = []
-    for candidate in candidates:
+    for index, candidate in enumerate(candidates):
         query = f'au:"{candidate}"'
         params = urlencode(
             {
@@ -295,7 +336,8 @@ def query_arxiv(row: pd.Series) -> dict[str, Any]:
             all_entries.extend(parsed["entries"])
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{candidate}: {type(exc).__name__}: {exc}")
-        time.sleep(0.15)
+        if index + 1 < len(candidates):
+            time.sleep(ARXIV_REQUEST_INTERVAL_SECONDS)
 
     # Deduplicate by title/link.
     dedup: dict[str, dict[str, str]] = {}
@@ -330,7 +372,26 @@ def query_arxiv(row: pd.Series) -> dict[str, Any]:
             if len(re.sub(r"[^a-z0-9\u4e00-\u9fff]", "", entry["title"])) >= 12
         )
     )
-    confidence = "中-DBLP交叉确认" if dblp_verified and author_cross_check and title_cross_check else "低-姓名未消歧"
+    publication_titles = re.sub(
+        r"[^a-z0-9\u4e00-\u9fff]",
+        "",
+        norm_text(row.get("近五年代表论文")).lower(),
+    )
+    publication_verified = norm_text(row.get("学术作者匹配置信度")) in {"high", "medium", "高", "中"}
+    publication_title_cross_check = bool(
+        publication_titles
+        and any(
+            re.sub(r"[^a-z0-9\u4e00-\u9fff]", "", entry["title"].lower()) in publication_titles
+            for entry in entries
+            if len(re.sub(r"[^a-z0-9\u4e00-\u9fff]", "", entry["title"])) >= 12
+        )
+    )
+    if publication_verified and publication_title_cross_check:
+        confidence = "中-学术库题名交叉确认"
+    elif dblp_verified and author_cross_check and title_cross_check:
+        confidence = "中-DBLP交叉确认"
+    else:
+        confidence = "低-姓名未消歧"
 
     return {
         "状态": "已查询",
@@ -684,6 +745,7 @@ def main() -> None:
     )
     df = apply_contact_statuses(df, SCHOOL_SLUG, COLLEGE_SLUG)
     dblp_detail = load_dblp_detail_sheet()
+    math_diagnostic_sheets = load_math_diagnostic_sheets()
     existing_web_search, web_search_detail_df = load_existing_web_search()
 
     raw_processed = load_checkpoint()
@@ -735,10 +797,14 @@ def main() -> None:
                     STATUS_COLUMN: row.get(STATUS_COLUMN, ""),
                     "arXiv置信度": arxiv.get("置信度", ""),
                     "发布日期": entry["published"],
+                    "更新日期": entry.get("updated", ""),
                     "题名": entry["title"],
                     "分类": entry["categories"],
                     "链接": entry["link"],
                     "作者": entry["authors"],
+                    "arXiv ID": entry.get("arxiv_id", ""),
+                    "DOI": entry.get("doi", ""),
+                    "期刊引用": entry.get("journal_ref", ""),
                 }
             )
         web_detail_rows: list[dict[str, Any]] = []
@@ -855,9 +921,7 @@ def main() -> None:
         web_detail_df = web_detail_df.drop_duplicates(subset=dedup_columns, keep="last")
         web_detail_df = apply_contact_statuses(web_detail_df, SCHOOL_SLUG, COLLEGE_SLUG)
     if not dblp_detail.empty:
-        dedup_columns = [
-            column for column in [TEACHER_ID_COLUMN, "DBLP作者链接", "年份", "题名", "链接"] if column in dblp_detail
-        ]
+        dedup_columns = publication_detail_dedup_columns(dblp_detail, is_math=IS_MATH_EVIDENCE)
         dblp_detail = dblp_detail.drop_duplicates(subset=dedup_columns, keep="last")
     if not web_search_detail_df.empty:
         web_search_detail_df = pd.DataFrame(
@@ -906,6 +970,10 @@ def main() -> None:
     out = out.map(clean_excel_cell)
     priority = priority.map(clean_excel_cell)
     dblp_detail = dblp_detail.map(clean_excel_cell) if not dblp_detail.empty else dblp_detail
+    math_diagnostic_sheets = {
+        name: frame.map(clean_excel_cell) if not frame.empty else frame
+        for name, frame in math_diagnostic_sheets.items()
+    }
     arxiv_detail_df = arxiv_detail_df.map(clean_excel_cell) if not arxiv_detail_df.empty else arxiv_detail_df
     web_detail_df = web_detail_df.map(clean_excel_cell) if not web_detail_df.empty else web_detail_df
     source = source.map(clean_excel_cell)
@@ -919,6 +987,9 @@ def main() -> None:
             sheet_name="数学文献近五年明细" if IS_MATH_EVIDENCE else "DBLP近三年明细",
             index=False,
         )
+        if IS_MATH_EVIDENCE:
+            for sheet_name, frame in math_diagnostic_sheets.items():
+                frame.to_excel(writer, sheet_name=sheet_name, index=False)
         arxiv_detail_df.to_excel(writer, sheet_name=ARXIV_DETAIL_SHEET, index=False)
         web_detail_df.to_excel(writer, sheet_name="网页证据明细", index=False)
         if not web_search_detail_df.empty:

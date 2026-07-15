@@ -70,6 +70,18 @@ class ViewerDataCacheTests(unittest.TestCase):
             self.assertEqual(payload["dblp"][0]["题名"], "Paper")
             self.assertEqual(payload["web"][0]["证据"], "Evidence")
 
+    def test_detail_matching_prefers_teacher_id_for_same_name(self) -> None:
+        rows = [
+            {"教师ID": "teacher_one", "姓名": "同名教师", "题名": "Paper One"},
+            {"教师ID": "teacher_two", "姓名": "同名教师", "题名": "Paper Two"},
+        ]
+        indexed = viewer_server.detail_index(rows)
+        matched = viewer_server.matching_details(
+            indexed,
+            {"教师ID": "teacher_two", "姓名": "同名教师"},
+        )
+        self.assertEqual([item["题名"] for item in matched], ["Paper Two"])
+
 
 if __name__ == "__main__":
     unittest.main()

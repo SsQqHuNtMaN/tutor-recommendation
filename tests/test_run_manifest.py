@@ -35,6 +35,16 @@ class RunManifestTests(unittest.TestCase):
         )
         self.assertNotEqual(first, second)
 
+    def test_stage_metadata_is_recorded_and_invalidates_fingerprint(self) -> None:
+        context = create_run_context(
+            "math_publications",
+            "school_college",
+            stage_metadata={"source_policy": "v1", "enabled_sources": ["official", "zbmath"]},
+        )
+        changed = replace(context, stage_metadata={"source_policy": "v2", "enabled_sources": ["official", "zbmath"]})
+        self.assertEqual(context.stage_metadata["source_policy"], "v1")
+        self.assertNotEqual(context.fingerprint, changed.fingerprint)
+
 
 if __name__ == "__main__":
     unittest.main()

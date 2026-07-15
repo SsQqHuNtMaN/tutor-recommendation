@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from hashlib import sha256
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +56,7 @@ class StudentProfile:
     profile_id: str = "legacy-default"
     display_name: str = "学生画像"
     excluded_terms: frozenset[str] = frozenset()
+    direction_term_groups: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 class ProfileConfigurationError(RuntimeError):
@@ -185,6 +186,31 @@ def load_student_profile(
             raise ProfileConfigurationError("concept aliases appear in multiple groups: " + ", ".join(sorted(duplicates)))
         used_aliases.update(lowered)
         alias_groups.append(aliases)
+    direction_groups_raw = data.get("direction_term_groups", {})
+    if direction_groups_raw is None:
+        direction_groups_raw = {}
+    if not isinstance(direction_groups_raw, dict):
+        raise ProfileConfigurationError("direction_term_groups must be an object of term lists")
+    direction_groups: dict[str, frozenset[str]] = {}
+    assigned_direction_terms: set[str] = set()
+    for raw_name, raw_terms in direction_groups_raw.items():
+        group_name = str(raw_name).strip()
+        if not group_name or not isinstance(raw_terms, list):
+            raise ProfileConfigurationError("direction_term_groups entries require a non-empty name and term list")
+        terms = frozenset(str(term).strip().lower() for term in raw_terms if str(term).strip())
+        unknown = terms - positive_terms
+        if unknown:
+            raise ProfileConfigurationError(
+                f"direction_term_groups.{group_name} contains unknown positive terms: "
+                + ", ".join(sorted(unknown))
+            )
+        duplicates = terms & assigned_direction_terms
+        if duplicates:
+            raise ProfileConfigurationError(
+                "direction terms appear in multiple groups: " + ", ".join(sorted(duplicates))
+            )
+        assigned_direction_terms.update(terms)
+        direction_groups[group_name] = terms
     canonical = json.dumps(raw_data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return StudentProfile(
         resume_match_context=resume_context,
@@ -202,6 +228,7 @@ def load_student_profile(
             for term in raw_data.get("excluded_terms", [])
             if str(term).strip()
         ),
+        direction_term_groups=direction_groups,
     )
 
 

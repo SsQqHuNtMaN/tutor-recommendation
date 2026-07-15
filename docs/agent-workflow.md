@@ -39,7 +39,7 @@ tutor profile extract <profile_id>
 
 `profile extract` 只做本地 PDF、DOCX、TXT、Markdown 或 JSON 文本抽取，生成 `student_profile.draft.json`。草稿带有阻断标记，不能进入正式匹配。
 
-Agent 应根据材料提炼背景摘要、研究方向、关键词权重、同义概念组和强信号词，然后集中向用户确认。确认后移除草稿标记，保存为：
+Agent 应根据材料提炼背景摘要、研究方向、关键词权重、同义概念组、可选方向分组和强信号词，然后集中向用户确认。方向分组用于表达数学方法、统计方法、AI 方法或学科桥接等可探索区域，必须引用画像中已有的正权重词，不能在排名代码中写申请者特例。确认后移除草稿标记，保存为：
 
 ```text
 user_private/profiles/<profile_id>/student_profile.json

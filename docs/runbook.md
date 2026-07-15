@@ -31,7 +31,7 @@ tutor setup
 tutor profile extract
 ```
 
-草稿位于 `user_private/profile/student_profile.draft.json`，带有确认阻断标记。Agent 必须让用户确认背景摘要、关键词权重、同义概念组、院所加分和强信号词，再保存为 `user_private/profile/student_profile.json` 并运行：
+草稿位于 `user_private/profile/student_profile.draft.json`，带有确认阻断标记。Agent 必须让用户确认背景摘要、关键词权重、同义概念组、可选方向分组、院所加分和强信号词，再保存为 `user_private/profile/student_profile.json` 并运行：
 
 ```powershell
 tutor profile validate
@@ -62,7 +62,9 @@ tutor run <target> --profile <profile_id-or-json-path>
 tutor run <target> --demo-profile
 ```
 
-`--profile` 和 `--demo-profile` 互斥。正式运行缺少或无法验证私有画像时会立即失败，不会自动使用公开模板。画像文件控制匹配方向、关键词权重、同义概念组、院所加分和强信号词。不要把真实画像提交到 Git。
+`--profile` 和 `--demo-profile` 互斥。正式运行缺少或无法验证私有画像时会立即失败，不会自动使用公开模板。画像文件控制匹配方向、关键词权重、同义概念组、方向分组、院所加分和强信号词。`direction_term_groups` 只能引用已有正权重词，同一个词不能跨组重复。不要把真实画像提交到 Git。
+
+画像权重、alias 或方向分组变化会改变 profile hash，使旧 checkpoint 失效。更新已确认画像后应正常运行 `tutor run <target> --profile <profile_id>` 重建三个阶段，再用 doctor 验证；不要只执行 `--finalize-only`。
 
 ## 3. 目标键
 
@@ -107,7 +109,7 @@ outputs/<school_slug>/<college_slug>/<school_slug>_<college_slug>_teacher_match_
 outputs/<school_slug>/<college_slug>/<school_slug>_<college_slug>_teacher_match_full_research.xlsx
 ```
 
-命名画像把同一结构放在 `outputs/by_profile/<profile_id>/` 下。数学目标的第二阶段文件使用 `_publications.xlsx`，明细表为 `数学文献近五年明细`；作者身份未达到中高置信度或缺少官方方向锚点时，论文命中不能改变推荐等级。
+命名画像把同一结构放在 `outputs/by_profile/<profile_id>/` 下。数学目标的第二阶段文件使用 `_publications.xlsx`，并包含 canonical `数学文献近五年明细`、`学术作者候选` 和 `论文来源报告`。第二阶段会为所有教师执行有界身份候选发现，但只对画像候选或中高置信作者拉取 works；作者身份未达到中高置信度或缺少官方方向锚点时，论文命中不能改变推荐等级。DOI、arXiv ID、来源稳定 ID及受作者/年份约束的题名用于跨库合并，预印本与正式版只计一篇。
 
 如果同一学校有多个重叠学院或多院导师库，应把这些目标放在同一条第一阶段命令里运行，这样会启用跨目标去重：
 
@@ -245,7 +247,7 @@ http://127.0.0.1:8765/
 <profile_root>/contact_status.json
 ```
 
-主表用于快速判断：推荐等级、匹配分、`命中关键词`、教师主页提取的 `研究方向` 和 `显式核心锚点`/`评分警告` 会并列显示。官方方向在表格中最多显示三行，悬停可查看全文；详情顶部直接展示 `是否建议套磁`，随后列出各来源证据分，并把教师主页方向与 DBLP 或数学文献、AI 交叉、arXiv、网页和 WebSearch 辅助信号分开。证据明细默认折叠，避免把论文数量误当成方向适配度。
+主表用于快速判断：推荐等级、匹配分、`命中关键词`、教师主页提取的 `研究方向` 和 `显式核心锚点`/`评分警告` 会并列显示。官方方向在表格中最多显示三行，悬停可查看全文；详情顶部直接展示 `是否建议套磁`，随后列出各来源证据分，并把 `画像方向分组`、教师主页方向与 DBLP 或数学文献、AI 交叉、arXiv、网页和 WebSearch 辅助信号分开。证据明细默认折叠，避免把论文数量误当成方向适配度。
 
 “查看已套磁”只显示 `套磁情况=已套磁` 的教师。“隐藏已标记”会隐藏所有非空状态，包括 `已套磁`、`先不考虑`、`不可能` 和 `不匹配`；同时启用两个相反筛选时结果为空。
 
@@ -317,9 +319,12 @@ DBLP 抓取失败：
 
 数学文献证据缺失：
 
-- 先检查官方 publication list 和 zbMATH 状态；数据库无记录保持中性。
+- 先检查官方 publication list 和 zbMATH 状态；`no_candidate` 只是没有找到作者候选，`no_recent_record` 才表示已确认作者在当前窗口无记录，二者都保持中性。
 - OpenAlex 是可选身份补充，需要时在本地设置 `$env:OPENALEX_API_KEY='...'`，不要把 key 写入文件。
 - 只有姓名、没有机构、ORCID 或官网题名交叉确认的作者候选保持待复核。
+- 需要人工确认 source ID 时，复制 `data/templates/publication_identity_overrides.example.json` 到 `user_private/overrides/publication_identity_overrides.json`，按稳定 `teacher_id` 填写并保留证据说明。
+- `terms_required`、`request_failed`、`schema_changed` 或来源报告中的 `degraded/截断` 表示来源没有完整运行，不能解释为作者没有论文；修复配置或稍后重跑该阶段。
+- 使用 `tutor doctor <target>` 核对空题名、canonical 重复、追溯缺失、作者复核队列和来源状态；不要只看主表论文数量判断抓取是否成功。
 
 arXiv 命中过多：
 

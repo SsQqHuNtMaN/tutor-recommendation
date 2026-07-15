@@ -75,6 +75,46 @@ class StudentProfileTests(unittest.TestCase):
             with self.assertRaises(ProfileConfigurationError):
                 load_student_profile(path, allow_template=False)
 
+    def test_direction_term_groups_load_only_known_positive_terms(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "profile.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "resume_match_context": "test",
+                        "keyword_weights": [["causal inference", 26]],
+                        "institute_bonus": [],
+                        "high_signal_terms": ["causal inference"],
+                        "direction_term_groups": {"math_ai_bridges": ["causal inference"]},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            profile = load_student_profile(path, allow_template=False)
+            self.assertEqual(profile.direction_term_groups["math_ai_bridges"], frozenset({"causal inference"}))
+
+    def test_direction_term_groups_reject_unknown_or_duplicate_terms(self) -> None:
+        for groups in (
+            {"ai_methods": ["unknown"]},
+            {"ai_methods": ["machine learning"], "math_ai_bridges": ["machine learning"]},
+        ):
+            with self.subTest(groups=groups), tempfile.TemporaryDirectory() as temp_dir:
+                path = Path(temp_dir) / "profile.json"
+                path.write_text(
+                    json.dumps(
+                        {
+                            "resume_match_context": "test",
+                            "keyword_weights": [["machine learning", 26]],
+                            "institute_bonus": [],
+                            "high_signal_terms": ["machine learning"],
+                            "direction_term_groups": groups,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(ProfileConfigurationError):
+                    load_student_profile(path, allow_template=False)
+
 
 if __name__ == "__main__":
     unittest.main()
